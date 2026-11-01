@@ -1,0 +1,15 @@
+.vs
+node_modules/
+dist/
+run/
+
+# Runtime config holds API keys: never commit it (the example files stay)
+browserdo.config.json
+browserdo.config.yaml
+browserdo.config.yml
+
+# Compiled tests
+.test-out/
+
+# npm pack output
+*.tgz

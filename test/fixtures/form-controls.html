@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>form controls</title>
+<!-- F0: browserInputText sets these without a picker. The title records what the page saw. -->
+</head>
+<body>
+<label for="city">City</label>
+<select id="city"><option>Sydney</option><option selected>Melbourne</option><option disabled>Perth</option><option>Brisbane</option></select>
+<input type="date" id="day">
+<script>
+  const seen = [];
+  for (const id of ["city", "day"]) {
+    document.getElementById(id).addEventListener("change", (e) => {
+      seen.push(`${id}=${e.target.value}${e.isTrusted ? "" : "(untrusted)"}`);
+      document.title = seen.join(" ");
+    });
+  }
+</script>
+</body>
+</html>

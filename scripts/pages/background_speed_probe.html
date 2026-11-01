@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Background speed probe</title>
+<!-- Browsers slow pages down when they are not in the foreground. Each block on this page is one kind of
+     affected page behaviour and records how many milliseconds it took, so whether or not a screenshot happens
+     to push the page along, the timing shows whether it ran on time. Results are also in window.__probe. -->
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; max-width: 900px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; }
+  .row { border: 1px solid #ccc; padding: 8px; margin: 6px 0; }
+  .val { font-weight: bold; }
+  #panel { overflow: hidden; height: 0; transition: height 400ms; background: #eef; }
+  #panel.open { height: 60px; }
+  #list li { height: 40px; border-bottom: 1px solid #eee; }
+  canvas { border: 1px solid #999; }
+</style>
+</head>
+<body>
+<h1>Background speed probe</h1>
+<p>Each block says what you should normally see. Page state: <span id="vis" class="val"></span>; open for <span id="age" class="val"></span> s.</p>
+
+<h2>1. Counter ticking every 100 ms (normal: +10 per second)</h2>
+<div class="row">Added in the last second: <span id="tickRate" class="val">-</span>　Total: <span id="ticks" class="val">0</span></div>
+
+<h2>2. Countdown (chained timers, minus 1 per second; after 5 minutes in the background it gets cut to once a minute)</h2>
+<div class="row">Left: <span id="countdown" class="val">600</span> s　Should be left: <span id="expected" class="val">600</span> s　Behind by: <span id="lag" class="val">0</span> s</div>
+
+<h2>3. Chart drawn on animation frames (normal: all 60 bars within 1 second of opening)</h2>
+<div class="row"><canvas id="chart" width="600" height="80"></canvas><br>Drawn: <span id="bars" class="val">0</span> / 60　Time to finish: <span id="barsMs" class="val">-</span></div>
+
+<h2>4. Type-ahead suggestions (shown 300 ms after typing stops)</h2>
+<div class="row"><input id="q" placeholder="Type a city, e.g. Shenzhen" autocomplete="off"> Suggestions: <span id="suggest" class="val">(none)</span></div>
+
+<h2>5. Content shown only after the expand animation ends (text appears about 0.4 s after the click)</h2>
+<div class="row"><button id="open">Show details</button><div id="panel"></div>Panel: <span id="panelState" class="val">collapsed</span>　Click to content: <span id="panelMs" class="val">-</span></div>
+
+<h2>6. Load more on scrolling to the bottom (normal: 20 more rows when the list bottom comes into view)</h2>
+<div class="row">Loaded: <span id="count" class="val">20</span> rows　Last scroll to load: <span id="loadMs" class="val">-</span><ul id="list"></ul><div id="sentinel">— end of list —</div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const t0 = Date.now();
+const probe = (window.__probe = {});
+
+// Page state and age
+setInterval(() => {
+  $('vis').textContent = document.visibilityState;
+  $('age').textContent = Math.round((Date.now() - t0) / 1000);
+}, 200);
+
+// 1. 100 ms counter
+let ticks = 0, last = 0;
+setInterval(() => { ticks++; $('ticks').textContent = ticks; }, 100);
+setInterval(() => { $('tickRate').textContent = ticks - last; probe.tickRate = ticks - last; last = ticks; }, 1000);
+
+// 2. Countdown on chained setTimeout
+let remain = 600;
+(function step() {
+  remain--; $('countdown').textContent = remain;
+  const expected = 600 - Math.floor((Date.now() - t0) / 1000);
+  $('expected').textContent = expected; $('lag').textContent = remain - expected;
+  probe.countdownLag = remain - expected;
+  if (remain > 0) setTimeout(step, 1000);
+})();
+
+// 3. One bar per animation frame
+const ctx = $('chart').getContext('2d');
+let bars = 0;
+(function draw() {
+  if (bars >= 60) return;
+  const h = 10 + ((bars * 37) % 60);
+  ctx.fillStyle = '#48c'; ctx.fillRect(bars * 10, 80 - h, 8, h);
+  bars++; $('bars').textContent = bars; probe.bars = bars;
+  if (bars === 60) { probe.barsMs = Date.now() - t0; $('barsMs').textContent = probe.barsMs + ' ms'; }
+  requestAnimationFrame(draw);
+})();
+
+// 4. Debounced suggestions
+const cities = ['Shenzhen', 'Shenzhen Bao\'an', 'Beijing', 'Beijing Daxing', 'Shanghai', 'Hangzhou'];
+let deb;
+$('q').addEventListener('input', () => {
+  clearTimeout(deb);
+  deb = setTimeout(() => {
+    const v = $('q').value.trim();
+    const hit = cities.filter((c) => v && c.startsWith(v));
+    $('suggest').textContent = hit.length ? hit.join(', ') : '(none)';
+    probe.suggest = hit;
+  }, 300);
+});
+
+// 5. Content filled in only after transitionend
+let clickedAt = 0;
+$('open').addEventListener('click', () => {
+  clickedAt = Date.now();
+  $('panelState').textContent = 'expanding…'; probe.panel = 'opening';
+  $('panel').classList.add('open');
+});
+$('panel').addEventListener('transitionend', () => {
+  $('panel').textContent = 'Flight details: CA8693 08:15 Shenzhen Bao\'an T3 → 11:25 Beijing Daxing';
+  $('panelState').textContent = 'shown'; probe.panel = 'shown';
+  probe.panelMs = Date.now() - clickedAt; $('panelMs').textContent = probe.panelMs + ' ms';
+});
+
+// 6. Infinite loading with IntersectionObserver
+let count = 0;
+const addRows = (n) => {
+  for (let i = 0; i < n; i++) {
+    const li = document.createElement('li'); li.textContent = `Result ${++count}`;
+    $('list').appendChild(li);
+  }
+  $('count').textContent = count; probe.count = count;
+};
+addRows(20);
+let scrolledAt = 0;
+addEventListener('scroll', () => { scrolledAt = Date.now(); }, { passive: true });
+new IntersectionObserver((es) => {
+  if (!es.some((e) => e.isIntersecting)) return;
+  addRows(20);
+  if (scrolledAt) { probe.loadMs = Date.now() - scrolledAt; $('loadMs').textContent = probe.loadMs + ' ms'; }
+})
+  .observe($('sentinel'));
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Control value probe</title>
+<style>body{font:14px system-ui,sans-serif;padding:16px} div{margin:6px 0} input,select,textarea{font:14px system-ui}</style>
+<p>One kind of control per row: see how value / placeholder are reported</p>
+
+<div>1 empty, with placeholder: <input placeholder="PH-EMPTY"></div>
+<div>2 value and placeholder: <input value="VAL-FILLED" placeholder="PH-SHOULD-NOT-SHOW"></div>
+<div>3 value, no placeholder: <input value="VAL-NO-PH"></div>
+<div>4 empty, no placeholder: <input></div>
+<div>5 password (filled): <input type="password" value="SECRET-1234" placeholder="PH-PWD"></div>
+<div>6 password (empty): <input type="password" placeholder="PH-PWD-EMPTY"></div>
+<div>7 textarea with value: <textarea rows="2">TEXTAREA-VALUE second part</textarea></div>
+<div>8 empty textarea with placeholder: <textarea rows="2" placeholder="PH-TEXTAREA"></textarea></div>
+<div>9 dropdown (B selected): <select><option>OPT-A</option><option selected>OPT-B-SELECTED</option><option>OPT-C</option></select></div>
+<div>10 date field: <input type="date" value="2026-09-16"></div>
+<div>11 button-type input: <input type="submit" value="BTN-SUBMIT-VALUE"></div>
+<div>12 checkbox: <input type="checkbox" checked id="cv1"><label for="cv1">CB-LABEL</label></div>
+<div>13 file picker: <input type="file"></div>
+<div>14 hidden field: <input type="hidden" value="HIDDEN-VALUE"></div>
+<div>15 read-only field: <input value="VAL-READONLY" readonly></div>
+<div>16 disabled field: <input value="VAL-DISABLED" disabled></div>

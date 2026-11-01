@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Readable name sources probe</title>
+<style>
+  body { font: 14px system-ui, sans-serif; padding: 16px; }
+  div { margin: 6px 0; }
+  .ico { display: inline-block; width: 24px; height: 24px; background: #48c; }
+  img { width: 24px; height: 24px; background: #c84; }
+  svg { width: 24px; height: 24px; vertical-align: middle; }
+</style>
+<p>One source of a readable name per row: see which ones make it into annotatedContent</p>
+
+<div>1 alt: <img alt="SRC-ALT" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></div>
+<div>2 aria-label on an img: <img aria-label="SRC-IMG-ARIA" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></div>
+<div>3 title attribute: <img title="SRC-IMG-TITLE" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></div>
+<div>4 aria-label on a button with an icon inside: <button aria-label="SRC-BTN-ARIA"><span class="ico"></span></button></div>
+<div>5 title child inside an svg: <svg viewBox="0 0 10 10"><title>SRC-SVG-TITLE</title><rect width="10" height="10" fill="#4a8"/></svg></div>
+<div>6 aria-labelledby pointing elsewhere: <span id="lbl" hidden>SRC-LABELLEDBY</span><button aria-labelledby="lbl"><span class="ico"></span></button></div>
+<div>7 icon button with nothing (control): <button><span class="ico"></span></button></div>
+<div>8 input placeholder: <input placeholder="SRC-PLACEHOLDER"></div>
+<div>9 input aria-label: <input aria-label="SRC-INPUT-ARIA"></div>
+<div>10 input type=password: <input type="password" placeholder="SRC-PASSWORD"></div>
+<div>11 checked radio button: <input type="radio" name="g" checked id="r1"><label for="r1">SRC-RADIO-CHECKED</label>
+                     <input type="radio" name="g" id="r2"><label for="r2">SRC-RADIO-UNCHECKED</label></div>
+<div>12 checked checkbox: <input type="checkbox" checked id="c1"><label for="c1">SRC-CHECKBOX-CHECKED</label></div>
+<div>13 dropdown current value: <select><option>SRC-OPTION-A</option><option selected>SRC-OPTION-B</option></select></div>
+<div>14 disabled button: <button disabled>SRC-DISABLED-BTN</button></div>
+<div>15 text truncated by CSS: <div style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">SRC-TRUNCATED this text is long enough that an ellipsis cuts off its second half</div></div>
+
+<div>16 img alt inside a clickable link: <a href="#x"><img alt="SRC-LINKED-ALT" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></a></div>
+<div>17 svg title inside a clickable link: <a href="#y"><svg viewBox="0 0 10 10"><title>SRC-LINKED-SVGTITLE</title><rect width="10" height="10" fill="#a84"/></svg></a></div>
+<div>18 img alt inside a clickable link that has its own text: <a href="#z"><img alt="SRC-BOTH-ALT" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">SRC-BOTH-TEXT</a></div>
+<div>19 img clickable itself (onclick): <img alt="SRC-CLICKABLE-ALT" onclick="void 0" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="></div>
+<div>20 large image (not 1x1) with alt: <img alt="SRC-BIGIMG-ALT" style="width:120px;height:60px" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iNjAiPjxyZWN0IHdpZHRoPSIxMjAiIGhlaWdodD0iNjAiIGZpbGw9IiM2OGEiLz48L3N2Zz4="></div>
+
+<h2 style="font-size:14px;color:#555;margin:18px 0 6px">Duplicate labels (Chinese button text: words with no spaces between them)</h2>
+<div>21 Chinese button, aria-label identical to the visible text: <button aria-label="预订酒店">预订酒店</button></div>
+<div>22 Chinese button, aria-label carries an extra part: <button aria-label="预订酒店（含早餐）">预订酒店</button></div>
+<div>23 Chinese button, text split in two spans that join into the aria-label: <button aria-label="立即预订"><span>立即</span><span>预订</span></button></div>
+<div>24 English button, aria-label identical to the visible text: <button aria-label="Book now">Book now</button></div>
+<div>25 Chinese button, differs only by leading/trailing spaces: <button aria-label=" 确认支付 ">确认支付</button></div>

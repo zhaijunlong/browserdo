@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  For live tests: requests geolocation on load, so the browser shows a permission bubble.
+  Used to verify that the popups field of browserTakeSnapshot really brings that bubble back,
+  and how browserClosePopupBubble handles action / appliedAction.
+
+  Why geolocation: the pdl says allowOnce is offered only on permissions with a genuine
+  session-scoped grant, and of those the model will be asked about, only geolocation qualifies,
+  so this one page verifies that all five actions appear in availableActions.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>permission-popup</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; padding: 24px; }
+      #state { font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h1>Permission bubble repro</h1>
+    <p>State: <span id="state">requesting location…</span></p>
+    <p>The page calls <code>navigator.geolocation.getCurrentPosition</code> on load;
+      the browser should show a permission bubble.</p>
+    <button id="again">Request again</button>
+
+    <script>
+      function ask() {
+        document.getElementById("state").textContent = "requesting location…";
+        document.title = "ASKING";
+        navigator.geolocation.getCurrentPosition(
+          function () {
+            document.getElementById("state").textContent = "granted";
+            document.title = "GRANTED";
+          },
+          function (e) {
+            document.getElementById("state").textContent =
+              "denied or failed: " + e.message;
+            document.title = "DENIED";
+          },
+          { timeout: 60000 },
+        );
+      }
+      document.getElementById("again").onclick = ask;
+      ask();
+    </script>
+  </body>
+</html>

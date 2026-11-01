@@ -1,0 +1,104 @@
+<!doctype html>
+<!--
+  Repro: after a same-document DOM replacement, clicking with the same snapshotId and an old emsn
+  made browserClick report success while nothing was actually clicked.
+
+  Why the page replaces itself on a timer instead of a person pressing a button: in an agent tab the
+  physical mouse and keyboard are suppressed, so a manual click does not get through. The timer lets
+  the whole repro run on CDP commands alone, with no manual input.
+
+  The buttons have exactly the same position and size; the replacement happens only inside #slot:
+    before the swap  #slot holds the OLD button
+    after 3 seconds  #slot holds the NEW button (same position, same size)
+  Clicking either button leaves a **visible** record below, so what was actually clicked can be
+  judged by eye, without reading document.title.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>stale-emsn-repro</title>
+    <style>
+      body {
+        margin: 0;
+        font: 16px/1.6 system-ui, sans-serif;
+        padding: 24px;
+      }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      #phase {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 700;
+        background: #ffe9a8;
+      }
+      #phase.swapped { background: #ffd0d0; }
+      #slot {
+        position: relative;
+        height: 90px;
+        margin: 20px 0;
+      }
+      #slot button {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 320px;
+        height: 64px;
+        font-size: 18px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .old { background: #d6f5d6; }
+      .new { background: #ffd6d6; }
+      #log {
+        border: 2px solid #333;
+        padding: 12px;
+        min-height: 80px;
+        white-space: pre-wrap;
+        font-family: ui-monospace, monospace;
+      }
+      #log:empty::before {
+        content: "(no button has been clicked yet)";
+        color: #888;
+      }
+      .hit { color: #b00; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h1>Stale emsn repro</h1>
+    <p>Phase: <span id="phase">before the swap (#slot holds OLD)</span></p>
+
+    <div id="slot">
+      <button class="old" onclick="hit('OLD')">OLD (button before the swap)</button>
+    </div>
+
+    <p><strong>Click log</strong> (if this is empty, that click hit nothing):</p>
+    <div id="log"></div>
+
+    <script>
+      function hit(which) {
+        var log = document.getElementById("log");
+        var line = document.createElement("div");
+        line.className = "hit";
+        line.textContent =
+          "Clicked: " + which + " button  @ " + new Date().toLocaleTimeString();
+        log.appendChild(line);
+        // Also written to the title, so browserGetWindowInfo can tell without looking at the screen
+        document.title = "CLICKED-" + which;
+      }
+
+      // After 3 seconds, replace everything in #slot. **Same document**: no navigation, no URL change,
+      // no load event, so the snapshotId stays valid (the pdl says only taking another snapshot or
+      // navigating/reloading voids it).
+      window.swap = function () {
+        document.getElementById("slot").innerHTML =
+          '<button class="new" onclick="hit(\'NEW\')">NEW (button after the swap, same position and size)</button>';
+        var p = document.getElementById("phase");
+        p.textContent = "swapped (#slot now holds NEW; same document, no navigation)";
+        p.className = "swapped";
+        document.title = "SWAPPED";
+      };
+      // Swaps automatically after 3 seconds; to pick the exact moment, call window.swap() via CDP Runtime.evaluate
+      window.autoSwapTimer = setTimeout(window.swap, 3000);
+    </script>
+  </body>
+</html>

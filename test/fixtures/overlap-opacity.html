@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>overlap-opacity</title>
+<!-- Found on example.com (2026-09-29): its script stacks six translations in one grid cell and
+     fades between them. The one on screen was missing from annotatedContent. Here: visible text
+     under an opacity:0 paragraph, the same text with nothing over it, and per-character spans. -->
+<style>
+  .stack { display: grid; }
+  .stack p { grid-area: 1 / 1; }
+  .hidden { opacity: 0; }
+</style>
+</head>
+<body>
+<div class="stack">
+  <p>VISIBLE UNDER A TRANSPARENT PARAGRAPH</p>
+  <p class="hidden">transparent paragraph on top</p>
+</div>
+<div class="stack">
+  <p class="hidden">transparent paragraph underneath</p>
+  <p>VISIBLE ON TOP OF A TRANSPARENT PARAGRAPH</p>
+</div>
+<p>VISIBLE ALONE</p>
+<p id="chars">VISIBLE PER CHARACTER</p>
+<!-- As example.com does it: the paragraphs stay opaque, each character's span carries the
+     opacity, with a transition; the middle one is the one on screen. -->
+<div class="stack" id="fading">
+  <p>first transparent per character</p>
+  <p>VISIBLE PER CHARACTER BETWEEN TRANSPARENT ONES</p>
+  <p>last transparent per character</p>
+</div>
+<script>
+  const spans = (p) => (p.innerHTML = [...p.textContent].map((c) => `<span style="transition:opacity .4s">${c}</span>`).join(""));
+  spans(document.getElementById("chars"));
+  const ps = document.querySelectorAll("#fading p");
+  ps.forEach((p, k) => {
+    spans(p);
+    for (const s of p.children) s.style.opacity = k === 1 ? "1" : "0";
+  });
+</script>
+</body>
+</html>

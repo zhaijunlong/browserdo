@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Overlay probe</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; height: 2000px; }
+  /* Everything absolutely positioned with fixed geometry, independent of document flow */
+  .box { position: absolute; width: 600px; height: 120px; border: 1px solid #ccc; padding: 8px; box-sizing: border-box; }
+  .cover { position: absolute; background: #fff; }        /* opaque */
+  .fixedcover { position: fixed; background: #fff; }
+  h2 { position: absolute; font-size: 14px; color: #555; margin: 0; }
+</style>
+
+<!-- 1 · The overlay is a sibling of the covered content (same parent, overlay comes after) -->
+<h2 style="left:20px; top:10px">1 · Sibling overlay</h2>
+<div style="position:absolute; left:20px; top:40px; width:600px; height:120px">
+  <div class="box" style="left:0; top:0">
+    <button>SIB-UNDER-BTN</button>
+    <p>SIB-UNDER-TEXT fully covered by an opaque sibling overlay</p>
+  </div>
+  <div class="cover" style="left:0; top:0; width:600px; height:120px">SIB-COVER sibling overlay</div>
+</div>
+
+<!-- 2 · The overlay is in another subtree, covering with absolute -->
+<h2 style="left:20px; top:180px">2 · Absolute overlay from another subtree</h2>
+<div style="position:absolute; left:20px; top:210px; width:600px; height:120px">
+  <div class="box" style="left:0; top:0">
+    <button>ABS-UNDER-BTN</button>
+    <p>ABS-UNDER-TEXT fully covered by an absolute overlay from another subtree</p>
+  </div>
+</div>
+<div class="cover" style="left:20px; top:210px; width:600px; height:120px; z-index:10">ABS-COVER overlay from another subtree</div>
+
+<!-- 3 · The overlay is in another subtree, covering with fixed -->
+<h2 style="left:20px; top:350px">3 · Fixed overlay from another subtree</h2>
+<div style="position:absolute; left:20px; top:380px; width:600px; height:120px">
+  <div class="box" style="left:0; top:0">
+    <button>FIX-UNDER-BTN</button>
+    <p>FIX-UNDER-TEXT fully covered by a fixed overlay from another subtree</p>
+  </div>
+</div>
+<div class="fixedcover" style="left:20px; top:380px; width:600px; height:120px; z-index:10">FIX-COVER fixed overlay from another subtree</div>
+
+<!-- 4 · Control: nothing covered -->
+<h2 style="left:20px; top:520px">4 · Control</h2>
+<div class="box" style="left:20px; top:550px">
+  <button>VISIBLE-BTN</button>
+  <p>VISIBLE-TEXT not covered by anything</p>
+</div>

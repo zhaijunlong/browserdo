@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>links</title>
+<!-- Every kind of link the link-address and agent-tab changes have to handle. -->
+</head>
+<body>
+<p><a id="plain" href="https://example.com/plain?q=a&amp;p=2">plain link</a></p>
+<p><a id="relative" href="stale-emsn-repro.html">relative link</a></p>
+<p><a id="pieces" href="https://example.com/pieces">three <em>highlighted</em> pieces</a></p>
+<p><a id="image" href="https://example.com/image"><img alt="image link" width="40" height="20" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></p>
+<p><a id="js" href="javascript:void(0)">javascript link</a></p>
+<p><a id="data" href="data:text/plain;base64,SGVsbG8gd29ybGQ=">data link</a></p>
+<p><a id="blank" href="links.html?child=blank" target="_blank" rel="noopener">opens a new tab</a></p>
+<p><button id="open" onclick="window.open('links.html?child=open')">window.open button</button></p>
+</body>
+</html>

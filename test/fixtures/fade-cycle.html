@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fade-cycle</title>
+<!-- Repro of a kernel miss found on example.com (2026-09-29, its /s.js). Several paragraphs
+     stacked in one grid cell, each character in its own span; every second the shown paragraph
+     fades out and the next fades in (opacity transition on the spans). Freshly loaded, the first
+     paragraph is in annotatedContent; once the page has switched, the one on screen is not. -->
+<style>
+  body { display: grid; font: 20px sans-serif; }
+  p { grid-area: 1 / 1; }
+  span { transition: opacity .4s; }
+  p + p span { opacity: 0; }
+</style>
+</head>
+<body>
+<p>ONE IS SHOWN FIRST</p>
+<p>TWO IS SHOWN SECOND</p>
+<p>THREE IS SHOWN THIRD</p>
+<script>
+  const P = document.querySelectorAll("p");
+  for (const p of P) p.innerHTML = p.textContent.replace(/./gu, "<span>$&</span>");
+  const show = (p, v, d) =>
+    [...p.children].forEach((s, k, all) => {
+      s.style.transitionDelay = d + (k * 500) / all.length + "ms";
+      s.style.opacity = v;
+    });
+  let i = 0;
+  setInterval(() => {
+    show(P[i], 0, 0);
+    i = (i + 1) % P.length;
+    show(P[i], 1, 300);
+  }, 1000);
+</script>
+</body>
+</html>

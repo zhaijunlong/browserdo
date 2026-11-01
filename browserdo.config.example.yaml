@@ -1,0 +1,297 @@
+# BrowserDo runtime configuration (YAML: comments allowed, no trailing commas)
+# Copy this file to browserdo.config.yaml and fill in your own values.
+
+# ── Models we actually measured (Sept 2026, same Ctrip flight-booking task) ─────
+#
+#   Model                    Per round  Output  of which reasoning  Cache hit  Outcome
+#   dola-seed-2.1-turbo      19.8s        920   579 (63%)           21/22      hit the login wall
+#     (BytePlus, OpenAI-compatible)                                 61.5%
+#   gemini-3.5-flash-lite     4.1s        454     0 ( 0%)            1.1%      finished the task
+#   glm-5.3-flash            89~133s     4251  3608 (85%)           0 in 4/5   never finished
+#     WARNING: thinking cannot be disabled. Measured: reasoning_effort max -> high
+#        cuts only 7.5%, and a single round often exceeds the downstream 306s hard
+#        timeout, so a sizeable share of rounds never complete at all.
+#
+# Two things decide whether a model works here: the **reasoning share** (it drives
+# latency -- the answer itself is only 300~650 tokens) and the **cache hit rate**
+# (the system prompt is byte-identical every round, so any provider doing prefix
+# caching gets it for free).
+
+# Primary model
+vllm:
+  endpoint: https://generativelanguage.googleapis.com/v1beta/openai/v1
+  model: gemini-3.6-flash
+  apiKey: YOUR_PRIMARY_API_KEY
+  apiStyle: openai
+  timeoutMs: 60000
+  # Thinking controls. extraBody is merged into the request body verbatim --
+  # no mapping, no validation.
+  #
+  # WARNING: every vendor names these differently, takes different values, and
+  #    supports a different subset. **A wrong value is not ignored -- the request
+  #    fails outright.** That failure is classified as non-retryable and fails over
+  #    to the next model, so a misconfiguration shows up in the log as
+  #    "retryable error [none]" followed by an endpoint switch, rather than as
+  #    three 60-second retries.
+  #
+  #   GLM-5.3 / GLM-5.3-Flash
+  #       reasoning_effort: "low" | "high" | "max"      default: max
+  #       WARNING: thinking cannot be disabled; thinking: {type: "disabled"} is rejected.
+  #   BytePlus ModelArk / Volcano Ark (Doubao, Seed series)
+  #       thinking: { type: "enabled" | "disabled" }
+  #       reasoning_effort: "minimal" | "low" | "medium" | "high" | "max"
+  #       repetition_penalty: 1.0 ~ 2.0
+  #
+  #       WARNING: a given model does not necessarily accept every value the docs
+  #          list. **Measured on dola-seed-2.1-turbo**:
+  #          thinking:{type:"auto"}     -> HTTP 400
+  #             "Unsupported thinking type for the current model: auto"
+  #             (the docs mentioning auto describe the LAS product line, not the
+  #              ModelArk chat endpoint)
+  #          thinking:{type:"disabled"} -> works, and reasoning drops to zero:
+  #             output per round 920 -> 357 tokens, latency 19.8s -> 10.5s
+  #       WARNING: the Seed series has deep thinking **on** by default (measured:
+  #          579 reasoning tokens per round, 63% of output -- and output volume is
+  #          essentially what determines latency).
+  #       WARNING: reasoning_effort only means something if there is thinking to
+  #          tune. To test the levels, set thinking:{type:"enabled"} together with
+  #          reasoning_effort:"low"; do not pair it with disabled, which leaves
+  #          reasoning_effort nothing to act on.
+  #   GLM-4.7 and earlier
+  #       thinking: { type: "enabled" | "disabled" }
+  #       WARNING: the z.ai line reportedly ignores this parameter.
+  #   Qwen (DashScope / Bailian)
+  #       enable_thinking: true | false
+  #       WARNING: qwen3.8-max is thinking-only; passing false returns BadRequest.
+  #   Self-hosted vLLM / SGLang
+  #       chat_template_kwargs: { enable_thinking: false }
+  #   OpenAI family
+  #       reasoning_effort: "minimal" | "low" | "medium" | "high"
+  #   Gemini flash-lite
+  #       Nothing to set -- it has no separate thinking phase
+  #       (measured: thoughtsTokenCount is always 0).
+  #
+  # Why this is worth setting: measured on glm-5.3-flash, average output is 4251
+  # tokens, of which 3608 (85%) is reasoning -- and we never read reasoning_content,
+  # we discard it on arrival. The actual JSON answer is 643 tokens.
+  extraBody:
+    reasoning_effort: "low"
+
+# Fallback models (add as many as you like; tried in order when the primary fails)
+vllmFallbacks:
+  - endpoint: https://openrouter.ai/api/v1/chat/completions
+    model: qwen/qwen-2.5-vl-72b-instruct
+    apiKey: YOUR_FALLBACK_API_KEY_1
+    apiStyle: openai
+  - endpoint: https://generativelanguage.googleapis.com/v1beta/openai/v1
+    model: gemini-2.5-flash
+    apiKey: YOUR_FALLBACK_API_KEY_2
+    apiStyle: openai
+
+# Retry policy. 429 is left out on purpose: many endpoints also answer 429 when the
+# quota or balance is used up, often without the word "quota" that would mark it, and
+# retrying that wastes three waits before failing over; with a fallback configured,
+# failing over on a rate limit is also quicker than waiting. Add 429 back if you run
+# a single endpoint whose 429 only ever means "slow down".
+retry:
+  # Backoff when the far end is overloaded (a status listed below / network).
+  # Waiting is the only thing that helps here.
+  intervalMs: 60000
+  # Backoff when the model returns malformed output (Zod or JSON parse failure).
+  # The far end is fine; this one response just did not match the schema, and
+  # resending usually succeeds. Do not reuse the 60s value above: measured, one
+  # wrong constant costs a full minute of waiting plus another round of budget.
+  intervalMalformedMs: 1000
+  # Backoff after a request timeout. Short on purpose: you have just spent an
+  # entire deadline waiting.
+  intervalTimeoutMs: 1000
+  # How much to grow the deadline on each timeout retry, and how far it may grow
+  # relative to vllm.timeoutMs. If the deadline was not enough, the fix is a bigger
+  # deadline -- retrying with the same one fails again deterministically.
+  # Starting from 60s: 60 -> 90 -> 135 -> 202 (capped at 240).
+  timeoutEscalation: 1.5
+  timeoutMaxFactor: 4
+  maxRetries: 3
+  status: "500,502,503,504"
+
+# CDP
+cdp:
+  host: localhost
+  # Per-command CDP timeout. Do not go below 10000: browserInputText waits up to
+  # 10 seconds to confirm input focus while the renderer is busy, and a client that
+  # times out first cuts off a call that would have succeeded.
+  commandTimeoutMs: 30000
+
+# Debugging
+debug:
+  # Set to "1" to dump the full prompt sent to the model and its raw reply to disk
+  # each round (under snapshotDir, named by round, next to that round's screenshots).
+  # This is the only way to investigate why the model picked a given emsn --
+  # debug.log records the decision, not what the model saw. Off by default, because
+  # the prompt runs to tens of thousands of characters.
+  logPrompt: "0"
+  # Set to "1" to save every snapshot (screenshots and page text) under snapshotDir.
+  # Off by default: the files copy whatever was browsed, signed-in pages included,
+  # and nothing deletes them. The debug log is always at
+  # %LOCALAPPDATA%\Embiody\BrowserDo\logs and never holds page content.
+  saveSnapshots: "0"
+
+# Output paths
+paths:
+  snapshotDir: run/browser_data
+
+# Waits
+wait:
+  # How long to let the page settle after a batch of actions.
+  #
+  # The browserTakeSnapshot that follows does its own waiting for load (see the
+  # snapshot section below), so this was once lowered from 3000 to 1000.
+  # **Measured: 1000 is too tight.** On Ctrip, taking a snapshot 1 second after
+  # switching to the Flights tab caught the page before origin and destination had
+  # rendered; the model could not find its target, fell back to a neighbouring
+  # number, and typed "Shenzhen" into the Hotels button. That pattern repeated
+  # twice and burned four rounds, about 130 seconds.
+  # A snapshot waits for the load event, but a JS re-render triggered by a click
+  # fires no load event -- which is exactly the case this wait covers.
+  # The arithmetic: 1.5s extra / ~19s per round = 8%; getting it wrong once costs 130s.
+  postActionMs: 2500
+  postNavigateMs: 6000
+  # Pause between rounds. Default 0: a model call taking ten-plus seconds follows
+  # immediately, so this pause is redundant. The knob stays for the case where some
+  # site has to be slowed down deliberately (rate limiting and the like).
+  roundIntervalMs: 0
+
+# Screenshots
+snapshot:
+  # Whether to send the **raw** screenshot alongside the annotated one. On by default.
+  #
+  # It started off disabled, on the reasoning that the annotated image is a superset
+  # of the raw one. **That reasoning was wrong**: the number labels cover the very
+  # elements they annotate. It is worst on dense controls -- in the Ctrip calendar,
+  # adjacent labels 161/162 and 150/149 overlap each other, the dates inside the
+  # cells become unreadable, and the model can only guess (measured: it clicked
+  # Sept 1 when it meant Sept 16).
+  #
+  # The two images are **pixel-aligned** (the annotated one is the raw one plus a
+  # layer of boxes), so the model can cross-reference by coordinate: a box at (x,y)
+  # labelled 41 in the annotated image sits over "1" at the same spot in the raw
+  # image, so 41 is the cell for the 1st.
+  #
+  # Measured cost is small: images are 8% of the prompt (1089 vs 12479 tokens).
+  # Setting this to "0" (or false) saves no screenshot: the annotated image still
+  # takes it.
+  returnImage: "1"
+  # Deadline for the whole screenshot command. The kernel splits it internally:
+  # waiting for load gets everything except a 2-second reserve, so 7000 means
+  # "wait up to 5s for load, then 2s to capture". Below 2000 is raised to 2000;
+  # 0 means do not wait for load at all.
+  # Unlike the timeoutMs of browserNavigate, hitting this deadline can still yield a
+  # usable snapshot (with a note in message that loading did not finish) -- only
+  # coming back with nothing counts as an error.
+  timeoutMs: 7000
+  # How long to wait before retrying a failed screenshot (only non-deterministic
+  # failures are retried).
+  retryDelayMs: 2000
+
+# Overall task timeout (milliseconds)
+task:
+  totalTimeoutMs: 1800000
+
+# Guardrails
+guardrail:
+  # Loop detection threshold: if the model judges N repeats with no progress, pause.
+  repeatThreshold: 2
+  # Maximum actions per round. Every action in a batch bets on the same snapshot,
+  # so the later ones are likelier to be stale. Raising this saves model round trips
+  # and waits, but the risk compounds with batch length.
+  maxActionsPerRound: 5
+  # ── The keyword safety net for "a human has to do this step" ─────────────────
+  #
+  # The main mechanism is the model judging for itself and setting is_paused (the
+  # system prompt has a whole section on it). These two lists are the net for when
+  # it misses, and they are **deliberately narrow -- this gate does not accept
+  # false positives**: stopping wrongly means the task is cut off for no reason and
+  # someone has to take over.
+  #
+  # The difference between the two lists is **where they match**:
+  #   sensitiveIntent      matches only in "what I am about to do" (description).
+  #                        Payment words in an observation ("this flight supports
+  #                        online payment") are normal; in an intent ("click Pay")
+  #                        they are what should stop us.
+  #   sensitiveCredential  matches in "what I can see" (result) too. A password
+  #                        field is not normal wherever it turns up.
+  #
+  # Only words that are almost impossible to be harmless belong here. The first
+  # version included topic words like login / account / delete / privacy, and all of
+  # them were removed -- every one of them appears in legitimate actions: "click the
+  # privacy policy link", "open the account menu to see my orders", "remove the
+  # extra item from the cart" (which may be the task itself), "confirm we are logged
+  # in and continue". Bare English words are riskier still: "face" matches "the
+  # button face", "transfer" matches "transfer flight" (a connecting flight).
+  #
+  # Matching is case-insensitive; purely Latin-alphabet words require word
+  # boundaries (otherwise otp matches viewport and pay matches payload); CJK does
+  # not need boundaries.
+  #
+  # **Setting either list replaces the whole default -- it does not append.** To add
+  # a word, copy the default list and extend it, so that what you see in the config
+  # file is what is actually in effect. Adding a language is therefore a config
+  # change, not a code change. The defaults live in src/runtime_sensitive.ts.
+  # Before adding a word, work out whether you can construct a normal description
+  # that should be allowed through but would be caught by it.
+  #
+  # sensitiveIntent:
+  #   - checkout
+  #   - 支付
+  #   - 決済
+  # sensitiveCredential:
+  #   - password
+  #   - 密码
+  #   - パスワード
+
+# Browser settings (debug mode / custom path / a separate profile). If unset, BrowserDo
+# shares the person's own Embiody: the installed browser (installed first if need be), in
+# its Default profile, started as a double-click would if it is not open. Other profiles
+# the person creates are not used.
+#
+# Setting userDataDir or exePath gives BrowserDo a browser of its own on a separate
+# profile, started with BrowserDo's own flags (extraFlags and the rest below). Only then
+# may resetProfile be used: on the shared profile it is refused rather than delete it.
+#
+# Setting exePath skips both the registry lookup and auto-install and uses that
+# binary directly. The profile is then **derived automatically** from the exe path
+# (%APPDATA%/embiody/AgentUser-dev-<hash>), so it is not shared with an installed
+# copy -- if it were, ensureEmbiodyBrowser would find the live DevToolsActivePort of
+# the installed copy and reuse it, your build would never start, and everything you
+# saw while debugging would be the old behaviour.
+# Set userDataDir explicitly to pin a profile path; it takes highest priority.
+#
+# Once connected, the runtime prints the browser version and probes the protocol once
+# via Embiody.browserGetWindowInfo. A build older than the protocol this project
+# targets fails with a readable error, rather than failing halfway through a task.
+# browser:
+#   exePath: C:/path/to/embiody.exe                              # your own build
+#   userDataDir: C:/path/to/profile                              # a separate profile instead of the person's own
+#   extraFlags: "--no-sandbox --disable-gpu"                     # appended to the default flags, not a replacement
+#   resetProfile: true                                          # wipe the profile before each start, for a fixed initial state
+#   profileBaseline: run/profile-baselines/ctrip-residue         # optional: after wiping, restore from this baseline
+#
+# resetProfile / profileBaseline exist for **comparable experiments**. Pages remember
+# the previous run in the profile (cookies, localStorage), so a mistake in one round
+# is handed to the next. We measured this chain: a human set Ctrip to round-trip ->
+# round 1 the model entered 9/17 -> round 2 it read 11-13 as today and entered 11/18
+# -> round 3 we switched models, it saw 11-18 was a Wednesday matching "next
+# Wednesday", and never touched the date at all, treating the condition as met.
+# Three rounds facing three different page states; comparing models across them is
+# meaningless.
+#   resetProfile alone      = clean state, a brand-new profile each time; tests raw capability
+#   plus profileBaseline    = residue state, starting from the same residue each time;
+#                             tests whether the page leads the model astray
+# Save a baseline with scripts/save-profile-baseline.mjs (close the browser first).
+# If a browser still holds the profile, this errors out rather than force-killing it --
+# a directory in use cannot be wiped cleanly.
+#
+# Do not put Chrome kBadFlags entries in extraFlags (e.g. --disable-blink-features):
+# they raise the "unsupported command-line flag" infobar, which pushes the whole
+# viewport down, and snapshot bboxes stop lining up with click coordinates.
+# test/launch-config.test.ts guards this.

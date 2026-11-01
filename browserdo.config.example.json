@@ -1,0 +1,47 @@
+{
+  "vllm": {
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/v1",
+    "model": "gemini-3.6-flash",
+    "apiKey": "YOUR_PRIMARY_API_KEY",
+    "apiStyle": "openai",
+    "timeoutMs": 60000
+  },
+  "vllmFallbacks": [
+    {
+      "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "model": "qwen/qwen-2.5-vl-72b-instruct",
+      "apiKey": "YOUR_FALLBACK_API_KEY_1",
+      "apiStyle": "openai"
+    },
+    {
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/v1",
+      "model": "gemini-2.5-flash",
+      "apiKey": "YOUR_FALLBACK_API_KEY_2",
+      "apiStyle": "openai"
+    }
+  ],
+  "retry": {
+    "intervalMs": 60000,
+    "maxRetries": 3,
+    "status": "500,502,503,504"
+  },
+  "cdp": {
+    "host": "localhost"
+  },
+  "debug": {
+    "saveSnapshots": "0"
+  },
+  "paths": {
+    "snapshotDir": "run/browser_data"
+  },
+  "wait": {
+    "postActionMs": 3000,
+    "postNavigateMs": 6000
+  },
+  "task": {
+    "totalTimeoutMs": 1800000
+  },
+  "guardrail": {
+    "repeatThreshold": 2
+  }
+}

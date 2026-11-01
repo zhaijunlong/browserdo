@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>long page</title>
+<!-- A tall page for whole-page reads: ?n=paragraphs (default 3000). The last one says "the end". -->
+</head>
+<body>
+<script>
+  const n = Number(new URLSearchParams(location.search).get("n") || 3000);
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("p");
+    p.textContent = i === n - 1 ? "the end" : `paragraph ${i} of a long page`;
+    frag.appendChild(p);
+  }
+  document.body.appendChild(frag);
+</script>
+</body>
+</html>

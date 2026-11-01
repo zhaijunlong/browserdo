@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Duplicate label probe</title>
+<style>body{font:14px system-ui,sans-serif;padding:14px} div{margin:5px 0} button{font:14px system-ui;padding:4px 10px}</style>
+<p>How aria-label relates to the visible text: see when the label is still sent (the Chinese button text is test data: words with no spaces between them)</p>
+
+<div>1 Chinese, identical: <button aria-label="预订酒店">预订酒店</button></div>
+<div>2 Chinese, label has an extra part: <button aria-label="预订酒店（含早餐）">预订酒店</button></div>
+<div>3 Chinese, text split in two spans that join into the label: <button aria-label="立即预订"><span>立即</span><span>预订</span></button></div>
+<div>4 Chinese, text split in two spans, <b>no</b> aria-label: <button><span>马上</span><span>下单</span></button></div>
+<div>5 English, identical: <button aria-label="Book now">Book now</button></div>
+<div>6 English, text split in two spans that join into the label: <button aria-label="Book now"><span>Book</span><span> now</span></button></div>
+<div>7 Chinese, differs only by leading/trailing spaces: <button aria-label=" 确认支付 ">确认支付</button></div>
+<div>8 Chinese, an extra space in the middle: <button aria-label="确认 支付">确认支付</button></div>
+<div>9 Chinese, label unrelated to the text: <button aria-label="提交订单并支付">下一步</button></div>
