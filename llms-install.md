@@ -37,5 +37,14 @@ as `browserdo-mcp` and runs through `npx`.
 - Do not install the browser yourself or look in its folders to see whether it is installed.
   `browser_status` tells you.
 
+## If you are Cline
+
+Add the server through MCP Servers → Configure (Edit configuration) and edit the file it opens;
+that is the file Cline reads. Running `npx -y browserdo-mcp` in a terminal does not install it for
+you; only the config entry does. Don't install the package with `npm -g`, and don't stop node
+processes.
+
+## If something fails
+
 If installing the browser fails, `browser_status` says why and gives a download link the user can
 install from by hand; BrowserDo picks it up on the next call.
