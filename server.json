@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.zhaijunlong/browserdo",
+  "title": "BrowserDo",
+  "description": "Lets your AI agent read pages and act in Embiody, a Windows browser, while you keep using your PC.",
+  "repository": {
+    "url": "https://github.com/zhaijunlong/browserdo",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/zhaijunlong/browserdo#readme",
+  "version": "0.9.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "browserdo-mcp",
+      "version": "0.9.2",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
