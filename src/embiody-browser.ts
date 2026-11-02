@@ -20,7 +20,7 @@ import {
   SHARED_PROFILE,
 } from "./config.js";
 import { noteInstalled } from "./install_notice.js";
-import { onInstallRetry, setInstallStatus } from "./install_status.js";
+import { onInstallRecheck, setInstallStatus } from "./install_status.js";
 import { appendDebugLog } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -217,6 +217,7 @@ async function downloadVerified(
   onProgress: OnProgress,
   giveUpIfSlow: boolean,
 ): Promise<void> {
+  await appendDebugLog("embiody_browser", "downloading installer", { url: `${base}/${EMBIODY_INSTALLER_NAME}` });
   const sums = (await fetchBytes(`${base}/SHA256SUMS.txt`, limits)).toString("utf8");
   const line = sums
     .split(/\r?\n/)
@@ -231,6 +232,7 @@ async function downloadVerified(
   if (actual !== expected) {
     throw new Error(`Checksum mismatch: expected ${expected}, got ${actual}`);
   }
+  await appendDebugLog("embiody_browser", "installer checksum verified", { sha256: actual });
   await writeFile(dest, buffer);
 }
 
@@ -495,7 +497,10 @@ async function findOrInstallExe(): Promise<string> {
   return exePath;
 }
 
-onInstallRetry(() => void ensureEmbiodyInstalled().catch(() => {}));
+// After a failed install, a browser installed by hand ends the failure.
+onInstallRecheck(async () => {
+  if (await getInstalledExePath().catch(() => null)) setInstallStatus({ phase: "idle" });
+});
 
 /**
  * What the MCP server does at startup: install Embiody if it is missing, and return the port of

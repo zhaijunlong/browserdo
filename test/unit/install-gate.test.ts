@@ -8,7 +8,7 @@ process.env.EMBIODY_DEBUG_LOG = path.join(os.tmpdir(), "browserdo-test", String(
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { createMcpServer } = await import("../../src/server.js");
-const { onInstallRetry, setInstallStatus } = await import("../../src/install_status.js");
+const { onInstallRecheck, setInstallStatus } = await import("../../src/install_status.js");
 import type { CdpClient } from "../../src/cdp-client.js";
 
 type Reply = { content: Array<{ text: string }>; isError?: boolean };
@@ -17,7 +17,7 @@ type Reply = { content: Array<{ text: string }>; isError?: boolean };
 describe("tools while the browser is being installed", () => {
   afterEach(() => {
     setInstallStatus({ phase: "idle" });
-    onInstallRetry(() => {});
+    onInstallRecheck(async () => {});
   });
 
   // {} as CdpClient: a tool that got as far as the browser would fail on it, not reply with progress.
@@ -46,16 +46,28 @@ describe("tools while the browser is being installed", () => {
     await client.close();
   });
 
-  it("browser_status reports the progress, not as an error, and a failure retries the install", async () => {
-    let retries = 0;
-    onInstallRetry(() => retries++);
+  it("browser_status reports the progress, not as an error; a failure only looks for a browser installed by hand", async () => {
+    let rechecks = 0;
+    onInstallRecheck(async () => {
+      rechecks++;
+    });
     setInstallStatus({ phase: "failed", error: "cnb: HTTP 503" });
     const { client, call } = await connect();
     const reply = await call("browser_status");
     assert.ok(!reply.isError);
     assert.match(reply.content[0].text, /failed: cnb: HTTP 503/);
     await call("browser_click", { emsn: 1, snapshotId: "x" });
-    assert.equal(retries, 2, "each call while it stays failed retries once");
+    assert.equal(rechecks, 2, "each call while it stays failed looks again");
+    await client.close();
+  });
+
+  it("a browser installed by hand after a failure is used by the very next call", async () => {
+    setInstallStatus({ phase: "failed", error: "cnb: HTTP 503" });
+    onInstallRecheck(async () => setInstallStatus({ phase: "idle" }));
+    const { client, call } = await connect({ isConnected: false, versionProblem: null });
+    assert.match((await call("browser_status")).content[0].text, /installed but not connected/);
+    setInstallStatus({ phase: "failed", error: "cnb: HTTP 503" });
+    assert.doesNotMatch((await call("browser_get_window_info")).content[0].text, /Nothing was done/);
     await client.close();
   });
 

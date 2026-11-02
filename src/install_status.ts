@@ -8,22 +8,31 @@ export type InstallStatus =
   | { phase: "failed"; error: string };
 
 let status: InstallStatus = { phase: "idle" };
-let retry: () => void = () => {};
+let recheck: () => Promise<void> = async () => {};
 
 export function setInstallStatus(next: InstallStatus): void {
   status = next;
 }
 
-/** How to start the install again; embiody-browser sets it, tests stub it. */
-export function onInstallRetry(fn: () => void): void {
-  retry = fn;
+/** How to look again for an installed browser after a failure; embiody-browser sets it, tests stub it. */
+export function onInstallRecheck(fn: () => Promise<void>): void {
+  recheck = fn;
+}
+
+/**
+ * After a failed install, look for a browser installed by hand before answering, so the call
+ * made right after installing it can already use it. Nothing is downloaded again.
+ */
+export async function recheckFailedInstall(): Promise<void> {
+  if (status.phase === "failed") await recheck();
 }
 
 const MB = 1024 * 1024;
 
 /**
- * The install's state in a sentence, or null when nothing is being installed. A failed install
- * is started again first, so each call while it stays failed retries once.
+ * The install's state in a sentence, or null when nothing is being installed. A failed install is
+ * not retried: downloading again on every call would repeat the same failure (see
+ * recheckFailedInstall).
  */
 export function installProgress(now = Date.now()): string | null {
   switch (status.phase) {
@@ -43,10 +52,9 @@ export function installProgress(now = Date.now()): string | null {
     case "installing":
       return "The Embiody browser is downloaded and being installed; this usually takes a minute or two.";
     case "failed":
-      retry();
       return (
-        `Installing the Embiody browser failed: ${status.error}. The download has started again. ` +
-        `To install it by hand: ${EMBIODY_GITHUB_DOWNLOAD_BASE}/${EMBIODY_INSTALLER_NAME}`
+        `Installing the Embiody browser failed: ${status.error}. It is tried again the next time your ` +
+        `client starts BrowserDo. To install it by hand: ${EMBIODY_GITHUB_DOWNLOAD_BASE}/${EMBIODY_INSTALLER_NAME}`
       );
   }
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { installProgress, onInstallRetry, setInstallStatus } from "../../src/install_status.js";
+import { installProgress, onInstallRecheck, setInstallStatus } from "../../src/install_status.js";
 import { EMBIODY_INSTALLER_NAME } from "../../src/config.js";
 
 const MB = 1024 * 1024;
@@ -8,7 +8,7 @@ const MB = 1024 * 1024;
 describe("install progress", () => {
   afterEach(() => {
     setInstallStatus({ phase: "idle" });
-    onInstallRetry(() => {});
+    onInstallRecheck(async () => {});
   });
 
   it("says nothing when nothing is being installed", () => {
@@ -35,14 +35,10 @@ describe("install progress", () => {
     assert.match(installProgress()!, /being installed/);
   });
 
-  it("after a failure gives the reason and a manual download, and retries once per call", () => {
-    let retries = 0;
-    onInstallRetry(() => retries++);
+  it("after a failure gives the reason and a manual download", () => {
     setInstallStatus({ phase: "failed", error: "GitHub: fetch failed; cnb: HTTP 503" });
     const text = installProgress()!;
-    assert.match(text, /failed: GitHub: fetch failed; cnb: HTTP 503\. The download has started again/);
+    assert.match(text, /failed: GitHub: fetch failed; cnb: HTTP 503\. It is tried again the next time your client starts BrowserDo/);
     assert.ok(text.endsWith(EMBIODY_INSTALLER_NAME));
-    installProgress();
-    assert.equal(retries, 2);
   });
 });

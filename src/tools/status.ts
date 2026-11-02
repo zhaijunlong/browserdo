@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CdpClient } from "../cdp-client.js";
-import { installProgress } from "../install_status.js";
+import { installProgress, recheckFailedInstall } from "../install_status.js";
 
 export function registerStatusTool(server: McpServer, cdp: CdpClient): void {
   server.tool(
@@ -10,6 +10,7 @@ export function registerStatusTool(server: McpServer, cdp: CdpClient): void {
       "other tool replies with the progress instead of acting, and this one reports it.",
     {},
     async () => {
+      await recheckFailedInstall();
       const text =
         installProgress() ??
         cdp.versionProblem ??

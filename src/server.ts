@@ -11,7 +11,7 @@ import {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { CdpClient } from "./cdp-client.js";
 import { withInstallNotice } from "./install_notice.js";
-import { installProgress } from "./install_status.js";
+import { installProgress, recheckFailedInstall } from "./install_status.js";
 import { registerAllTools, type ToolSet } from "./tools/index.js";
 import { instructionsFor } from "./server_instructions.js";
 
@@ -25,7 +25,7 @@ export function createMcpServer(
 ): McpServer {
   const mcpServer = new McpServer({
     name: "browserdo",
-    version: "0.9.0",
+    version: "0.9.2",
   }, {
     instructions: instructionsFor(toolSet, installing),
     capabilities: {
@@ -50,6 +50,7 @@ export function createMcpServer(
     const name = a[0] as string;
     const handler = a[a.length - 1] as (...args: unknown[]) => Promise<CallToolResult>;
     a[a.length - 1] = async (...args: unknown[]) => {
+      if (!NO_BROWSER_NEEDED.has(name)) await recheckFailedInstall();
       const progress = NO_BROWSER_NEEDED.has(name) ? null : installProgress();
       if (progress) {
         return {
