@@ -31,6 +31,8 @@ as `browserdo-mcp` and runs through `npx`.
 
 ## Do not
 
+- Never stop or kill node processes (no Stop-Process, taskkill or pkill on node): other programs on
+  this computer use them.
 - Do not change the MCP settings of other clients (Claude Code, Claude Desktop, Cursor, VS Code and
   so on). The README lists them for their own users.
 - Do not clone the repository or build it: the npm package is all that is needed.
@@ -39,10 +41,13 @@ as `browserdo-mcp` and runs through `npx`.
 
 ## If you are Cline
 
-Add the server through MCP Servers → Configure (Edit configuration) and edit the file it opens;
-that is the file Cline reads. Running `npx -y browserdo-mcp` in a terminal does not install it for
-you; only the config entry does. Don't install the package with `npm -g`, and don't stop node
-processes.
+Cline 4 reads `%USERPROFILE%\.cline\data\settings\cline_mcp_settings.json`. If that folder exists,
+edit that file, not the older one under
+`%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings`. A person can open the same file
+from MCP Servers → Edit configuration.
+
+Running `npx -y browserdo-mcp` in a terminal does not install it for you; only the config entry
+does. Don't install the package with `npm -g`.
 
 ## If something fails
 
