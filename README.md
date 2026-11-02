@@ -306,7 +306,7 @@ and point at it with `--config`.
 ```bash
 npm install
 npm run build
-npm test          # 897 tests
+npm test          # 902 tests
 npm run test:fast # unit and module tests only
 ```
 

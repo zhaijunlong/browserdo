@@ -19,6 +19,7 @@ import {
   EMBIODY_USER_DATA_DIR,
   SHARED_PROFILE,
 } from "./config.js";
+import { acquireInstallLock } from "./install_lock.js";
 import { noteInstalled } from "./install_notice.js";
 import { onInstallRecheck, setInstallStatus } from "./install_status.js";
 import { appendDebugLog } from "./logger.js";
@@ -301,8 +302,38 @@ async function waitForInstall(timeoutMs: number): Promise<string | null> {
   return null;
 }
 
-/** Download and silently install Embiody, returning the exe path; the install status follows each step. */
+/**
+ * Install Embiody unless another BrowserDo process is installing it, in which case wait for that
+ * one; returns the exe path. If the other one ends without a browser, this one tries.
+ */
 async function installEmbiody(): Promise<string> {
+  let waiting = false;
+  for (;;) {
+    const lock = await acquireInstallLock();
+    if (lock) {
+      try {
+        return (await getInstalledExePath()) ?? (await downloadAndInstall());
+      } finally {
+        lock.release();
+      }
+    }
+    if (!waiting) {
+      waiting = true;
+      setInstallStatus({ phase: "elsewhere" });
+      await appendDebugLog("embiody_browser", "another BrowserDo is installing Embiody; waiting");
+    }
+    await sleep(2_000);
+    const exePath = await getInstalledExePath();
+    if (exePath) {
+      await appendDebugLog("embiody_browser", "installed by another BrowserDo", { exePath });
+      noteInstalled();
+      return exePath;
+    }
+  }
+}
+
+/** Download and silently install Embiody, returning the exe path; the install status follows each step. */
+async function downloadAndInstall(): Promise<string> {
   const installerPath = path.join(
     os.tmpdir(),
     `embiody_installer_${Date.now()}.exe`,
@@ -489,6 +520,10 @@ async function findOrInstallExe(): Promise<string> {
     }
     exePath = customExePath;
     await appendDebugLog("embiody_browser", "using custom exe path", { exePath });
+  } else if (process.platform !== "win32") {
+    // The browser is Windows only: downloading its installer here would be wasted.
+    setInstallStatus({ phase: "unsupported" });
+    throw new Error("BrowserDo needs Windows 10 or 11");
   } else {
     exePath = (await getInstalledExePath()) ?? (await installEmbiody());
   }

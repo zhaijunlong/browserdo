@@ -11,12 +11,13 @@ import {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { CdpClient } from "./cdp-client.js";
 import { withInstallNotice } from "./install_notice.js";
-import { installProgress, recheckFailedInstall } from "./install_status.js";
+import { appendDebugLog } from "./logger.js";
+import { canInstall, installProgress, recheckFailedInstall } from "./install_status.js";
 import { registerAllTools, type ToolSet } from "./tools/index.js";
 import { instructionsFor } from "./server_instructions.js";
 
 /** Tools that work without the browser, so they still run while it is being installed. */
-const NO_BROWSER_NEEDED = new Set(["browser_status", "browser_stop_task"]);
+const NO_BROWSER_NEEDED = new Set(["browser_status", "browser_stop_task", "browser_wait"]);
 
 export function createMcpServer(
   cdpClient: CdpClient,
@@ -54,16 +55,27 @@ export function createMcpServer(
       const progress = NO_BROWSER_NEEDED.has(name) ? null : installProgress();
       if (progress) {
         return {
-          content: [{ type: "text", text: `${progress} Nothing was done; call again once it is ready (browser_status checks without doing anything).` }],
+          content: [{ type: "text", text: canInstall() ? `${progress} Nothing was done; call again once it is ready (browser_status checks without doing anything).` : progress }],
           isError: true,
         };
       }
-      return withInstallNotice(await handler(...args));
+      const result = await handler(...args);
+      // Agents wait out the install with browser_wait: tell them how far it has got.
+      const still = name === "browser_wait" ? installProgress() : null;
+      if (still) result.content = [...(result.content ?? []), { type: "text", text: still }];
+      return withInstallNotice(result);
     };
     return register(...a);
   }) as typeof mcpServer.tool;
 
   registerAllTools(mcpServer, cdpClient, toolSet);
+
+  // Which client started BrowserDo, as it names itself: evidence for telling clients apart in the
+  // install statistics some day.
+  mcpServer.server.oninitialized = () => {
+    const client = mcpServer.server.getClientVersion();
+    void appendDebugLog("server", "client connected", { name: client?.name, version: client?.version });
+  };
 
   // Embiody.authRequired is not forwarded: the pdl says the browser never sends it, and
   // provideAuthResponse refuses. A person is brought in through browserStartHumanControl.

@@ -1560,9 +1560,10 @@ export async function browserWait(
   _cdp: CdpClient,
   params: { durationMs?: number },
 ): Promise<ActionResult> {
-  const ms = Math.min(Math.max(Number(params.durationMs ?? 2000), 100), 10000);
+  const asked = Number(params.durationMs ?? 2000);
+  const ms = Math.min(Math.max(asked, 100), 10000);
   await new Promise((resolve) => setTimeout(resolve, ms));
-  return { ok: true, text: `Waited ${ms}ms` };
+  return { ok: true, text: asked > ms ? `Waited ${ms}ms, the most one call waits` : `Waited ${ms}ms` };
 }
 
 /**

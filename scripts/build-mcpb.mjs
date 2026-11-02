@@ -1,6 +1,8 @@
-// Builds the Claude Desktop extension: one bundled server file, a manifest and the license,
-// packed into mcpb/browserdo-mcp-<version>.mcpb. Run after `npm run build` (the tool list is read
-// from dist/). Claude Desktop runs it with its own Node.js, so users need none.
+// Builds an MCP Bundle (mcpb) for one statistics channel: one bundled server file, a manifest, the
+// license and the icon, packed into mcpb/browserdo-mcp-<channel>-<version>.mcpb. The channel picks
+// the browser installer it downloads (EmbiodySetup-Offline-<CHANNEL>.exe), so each client that takes
+// mcpb gets its own: `node scripts/build-mcpb.mjs --channel CLDD` (Claude Desktop). Run after
+// `npm run build` (the tool list is read from dist/). The client runs it with its own Node.js.
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,9 +12,15 @@ import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+const channel = process.argv[process.argv.indexOf("--channel") + 1] ?? "";
+// Brand codes are exactly four letters; the browser's updater drops any other value silently.
+if (!process.argv.includes("--channel") || !/^[A-Z]{4}$/.test(channel)) {
+  console.error("Usage: node scripts/build-mcpb.mjs --channel <four capital letters, e.g. CLDD>");
+  process.exit(1);
+}
 const out = path.join(root, "mcpb");
-const stage = path.join(out, "stage");
-rmSync(out, { recursive: true, force: true });
+const stage = path.join(out, `stage-${channel.toLowerCase()}`);
+rmSync(stage, { recursive: true, force: true });
 mkdirSync(path.join(stage, "server"), { recursive: true });
 
 await build({
@@ -24,8 +32,7 @@ await build({
   target: "node20",
   // The bundled CommonJS dependencies (express, ws) call require.
   banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
-  // Installs from Claude Desktop are counted as their own channel.
-  define: { "process.env.BROWSERDO_CHANNEL": '"CLDD"' },
+  define: { "process.env.BROWSERDO_CHANNEL": JSON.stringify(channel) },
   logLevel: "warning",
 });
 
@@ -63,7 +70,7 @@ writeFileSync(path.join(stage, "manifest.json"), JSON.stringify(manifest, null, 
 copyFileSync(path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
 copyFileSync(path.join(root, "assets", "icon.png"), path.join(stage, "icon.png"));
 
-const file = path.join(out, `browserdo-mcp-${pkg.version}.mcpb`);
+const file = path.join(out, `browserdo-mcp-${channel.toLowerCase()}-${pkg.version}.mcpb`);
 const cli = path.join(root, "node_modules", "@anthropic-ai", "mcpb", "dist", "cli", "cli.js");
 execFileSync(process.execPath, [cli, "validate", path.join(stage, "manifest.json")], { stdio: "inherit" });
 execFileSync(process.execPath, [cli, "pack", stage, file], { stdio: "inherit" });

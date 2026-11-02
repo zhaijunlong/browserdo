@@ -5,6 +5,8 @@ export type InstallStatus =
   | { phase: "idle" }
   | { phase: "downloading"; source: "GitHub" | "cnb"; received: number; total: number | null; startedAt: number }
   | { phase: "installing" }
+  | { phase: "elsewhere" }
+  | { phase: "unsupported" }
   | { phase: "failed"; error: string };
 
 let status: InstallStatus = { phase: "idle" };
@@ -12,6 +14,11 @@ let recheck: () => Promise<void> = async () => {};
 
 export function setInstallStatus(next: InstallStatus): void {
   status = next;
+}
+
+/** False on a system the browser does not run on: no tool will ever work there. */
+export function canInstall(): boolean {
+  return status.phase !== "unsupported";
 }
 
 /** How to look again for an installed browser after a failure; embiody-browser sets it, tests stub it. */
@@ -51,6 +58,10 @@ export function installProgress(now = Date.now()): string | null {
     }
     case "installing":
       return "The Embiody browser is downloaded and being installed; this usually takes a minute or two.";
+    case "elsewhere":
+      return "Another BrowserDo on this computer is downloading and installing the Embiody browser; this takes a few minutes.";
+    case "unsupported":
+      return `BrowserDo needs Windows 10 or 11, and this computer runs ${process.platform}; no browser tool can work here.`;
     case "failed":
       return (
         `Installing the Embiody browser failed: ${status.error}. It is tried again the next time your ` +

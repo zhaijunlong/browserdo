@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "browserdo": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "browserdo-mcp"]
+    }
+  }
+}

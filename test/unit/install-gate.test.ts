@@ -71,6 +71,26 @@ describe("tools while the browser is being installed", () => {
     await client.close();
   });
 
+  it("browser_wait waits and adds the progress, not as an error", async () => {
+    setInstallStatus({ phase: "installing" });
+    const { client, call } = await connect();
+    const reply = await call("browser_wait", { durationMs: 100 });
+    assert.ok(!reply.isError);
+    assert.match(reply.content[0].text, /Waited 100ms/);
+    assert.match(reply.content[1].text, /being installed/);
+    await client.close();
+  });
+
+  it("off Windows a tool says BrowserDo needs Windows, without asking to call again", async () => {
+    setInstallStatus({ phase: "unsupported" });
+    const { client, call } = await connect();
+    const reply = await call("browser_get_window_info");
+    assert.equal(reply.isError, true);
+    assert.match(reply.content[0].text, /needs Windows 10 or 11/);
+    assert.doesNotMatch(reply.content[0].text, /call again/);
+    await client.close();
+  });
+
   it("browser_stop_task still runs: it needs no browser", async () => {
     setInstallStatus({ phase: "installing" });
     const { client, call } = await connect();
