@@ -1,6 +1,6 @@
 {
   "name": "browserdo-mcp",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Built for AI agents. Shared with people. The MCP server for Embiody, the Windows browser your AI agent works in while you keep using your PC.",
   "mcpName": "io.github.zhaijunlong/browserdo",
   "type": "module",
@@ -42,7 +42,8 @@
     "test:integration": "npm run test:build && node --test \".test-out/test/integration/**/*.test.js\"",
     "test:contract": "npm run test:build && node --test \".test-out/test/contract/**/*.test.js\"",
     "test:fast": "npm run test:build && node --test \".test-out/test/unit/**/*.test.js\" \".test-out/test/module/**/*.test.js\"",
-    "test:live": "npm run test:build && node --test \".test-out/test/live/**/*.test.js\""
+    "test:live": "npm run test:build && node --test \".test-out/test/live/**/*.test.js\"",
+    "build:mcpb": "npm run build && node scripts/build-mcpb.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -52,11 +53,13 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@modelcontextprotocol/inspector": "^1.0.1",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
+    "esbuild": "^0.25.12",
     "typescript": "^5.9.3"
   }
 }

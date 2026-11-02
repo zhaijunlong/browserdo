@@ -49,7 +49,12 @@ export const EMBIODY_APP_PATHS_KEYS = [
  */
 export const EMBIODY_GITHUB_DOWNLOAD_BASE =
   "https://github.com/zhaijunlong/embiody-dist/releases/latest/download";
-export const EMBIODY_INSTALLER_NAME = "EmbiodySetup-Offline-NPMX.exe";
+/**
+ * The statistics channel of the installer BrowserDo downloads: NPMX for the npm package; the Claude
+ * Desktop extension (mcpb) fixes CLDD at build time (scripts/build-mcpb.mjs).
+ */
+export const EMBIODY_CHANNEL = process.env.BROWSERDO_CHANNEL || "NPMX";
+export const EMBIODY_INSTALLER_NAME = `EmbiodySetup-Offline-${EMBIODY_CHANNEL}.exe`;
 
 /** The fallback source. Release page; the `latest=<url>` line in its Overview points at the newest installer. */
 export const EMBIODY_RELEASES_PAGE_URL =

@@ -10,12 +10,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-// js-yaml is a CJS module; createRequire is the most reliable way to load it from ESM.
-const yamlModule = createRequire(import.meta.url)("js-yaml") as {
-  load: (text: string) => unknown;
-};
+// A namespace import: js-yaml's ESM build has no default export. A static import also lets esbuild bundle it (the mcpb).
+import * as yaml from "js-yaml";
 
 /** Dotted config key -> environment variable. A file value is used only when the env has none. */
 const CONFIG_ENV_MAP: Array<[string, string]> = [
@@ -199,7 +195,7 @@ export function loadRuntimeConfigFile(configPath?: string): void {
   let raw: unknown;
   try {
     // yaml.load parses both YAML and JSON (JSON is a subset of YAML), with comments allowed.
-    raw = yamlModule.load(readFileSync(file, "utf8")) as unknown;
+    raw = yaml.load(readFileSync(file, "utf8")) as unknown;
   } catch (e) {
     console.error(
       `[runtime_config] failed to parse the config file (${file}): ${e instanceof Error ? e.message : String(e)}`,

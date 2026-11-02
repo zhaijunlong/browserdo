@@ -13,3 +13,4 @@ browserdo.config.yml
 
 # npm pack output
 *.tgz
+mcpb/
