@@ -17,6 +17,15 @@
       "transport": {
         "type": "stdio"
       }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/zhaijunlong/browserdo/releases/download/v0.9.3/browserdo-mcp-cldd-0.9.3.mcpb",
+      "version": "0.9.3",
+      "fileSha256": "321c928f52d48b49971fa90e73fc82a954960fe52a2fd1cf61d110ee42e9fddd",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }

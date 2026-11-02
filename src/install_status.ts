@@ -16,6 +16,10 @@ export function setInstallStatus(next: InstallStatus): void {
   status = next;
 }
 
+export function getInstallStatus(): InstallStatus {
+  return status;
+}
+
 /** False on a system the browser does not run on: no tool will ever work there. */
 export function canInstall(): boolean {
   return status.phase !== "unsupported";

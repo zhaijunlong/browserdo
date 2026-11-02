@@ -19,9 +19,9 @@ import {
   EMBIODY_USER_DATA_DIR,
   SHARED_PROFILE,
 } from "./config.js";
-import { acquireInstallLock } from "./install_lock.js";
+import { acquireInstallLock, readInstallLock } from "./install_lock.js";
 import { noteInstalled } from "./install_notice.js";
-import { onInstallRecheck, setInstallStatus } from "./install_status.js";
+import { getInstallStatus, onInstallRecheck, setInstallStatus, type InstallStatus } from "./install_status.js";
 import { appendDebugLog } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -309,7 +309,7 @@ async function waitForInstall(timeoutMs: number): Promise<string | null> {
 async function installEmbiody(): Promise<string> {
   let waiting = false;
   for (;;) {
-    const lock = await acquireInstallLock();
+    const lock = await acquireInstallLock(() => JSON.stringify(getInstallStatus()));
     if (lock) {
       try {
         return (await getInstalledExePath()) ?? (await downloadAndInstall());
@@ -319,9 +319,9 @@ async function installEmbiody(): Promise<string> {
     }
     if (!waiting) {
       waiting = true;
-      setInstallStatus({ phase: "elsewhere" });
       await appendDebugLog("embiody_browser", "another BrowserDo is installing Embiody; waiting");
     }
+    setInstallStatus(holderProgress(await readInstallLock()));
     await sleep(2_000);
     const exePath = await getInstalledExePath();
     if (exePath) {
@@ -330,6 +330,17 @@ async function installEmbiody(): Promise<string> {
       return exePath;
     }
   }
+}
+
+/** The install status to show while another process installs: its own progress, when it sends one. */
+function holderProgress(sent: string | null): InstallStatus {
+  try {
+    const status = JSON.parse(sent ?? "") as InstallStatus;
+    if (status.phase === "downloading" || status.phase === "installing") return status;
+  } catch {
+    // An older BrowserDo sends nothing.
+  }
+  return { phase: "elsewhere" };
 }
 
 /** Download and silently install Embiody, returning the exe path; the install status follows each step. */
