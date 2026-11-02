@@ -93,7 +93,8 @@ No API key is needed. Your agent drives the browser with its own model.
 
 ## Install
 
-BrowserDo runs as `npx -y browserdo-mcp`. Pick your client:
+BrowserDo runs as `npx -y browserdo-mcp`. Pick your client and follow only that section; the others
+are for other clients.
 
 ### Claude Code
 
@@ -169,6 +170,22 @@ Run **MCP: Add Server** from the Command Palette, choose **Command (stdio)** and
 ### Gemini CLI
 
 Add to `~/.gemini/settings.json` (all projects) or `.gemini/settings.json` (one project):
+
+```json
+{
+  "mcpServers": {
+    "browserdo": {
+      "command": "npx",
+      "args": ["-y", "browserdo-mcp"]
+    }
+  }
+}
+```
+
+### Other MCP clients
+
+Add a local (stdio) MCP server in your client's settings, with command `npx` and arguments
+`-y browserdo-mcp`. Most clients take it in this shape:
 
 ```json
 {
