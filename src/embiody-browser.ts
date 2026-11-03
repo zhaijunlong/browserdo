@@ -270,11 +270,75 @@ export async function downloadInstaller(
 }
 
 /**
- * Run the installer silently; do not wait for its child processes. Without --silent it shows a
- * progress window and then opens the browser on the person's own profile (the browser's
- * installer documentation).
+ * Run the installer silently and wait for it to exit; do not wait for its child processes. Without
+ * --silent it shows a progress window and then opens the browser on the person's own profile (the
+ * browser's installer documentation).
+ *
+ * Started outside the client's app container (startOutsideContainer); if that fails, it runs as
+ * BrowserDo's own child.
  */
 async function runInstaller(installerPath: string): Promise<void> {
+  let pid: number;
+  try {
+    pid = await startOutsideContainer(`${quoteArg(installerPath)} --silent`);
+  } catch (error) {
+    await appendDebugLog("embiody_browser", "could not start the installer through WMI; running it directly", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await runInstallerDirectly(installerPath);
+    return;
+  }
+  // WMI does not give the exit code; the caller checks the registry for the installed browser.
+  const deadline = Date.now() + INSTALL_TIMEOUT_MS;
+  while (processExists(pid)) {
+    if (Date.now() > deadline) {
+      throw new Error(`The installer did not finish within ${INSTALL_TIMEOUT_MS / 60_000} minutes`);
+    }
+    await sleep(2_000);
+  }
+}
+
+/** A stuck installer is given up on after this long, so the install fails and the next call retries it. */
+const INSTALL_TIMEOUT_MS = 20 * 60_000;
+
+/**
+ * Start a program through WMI's Win32_Process.Create, so that Windows' WMI service creates it
+ * outside any app container; returns its process id. A client installed as an MSIX package (the
+ * Microsoft Store build of Claude Desktop) runs BrowserDo in its package's registry view, where new
+ * HKCU keys go to the package's private registry and the rest of Windows never sees them: the
+ * installer then registered the browser's updater where Windows' COM service could not find it
+ * (75003), and the browser would lose keys it creates, such as those for the default browser.
+ * BrowserDo cannot detect this: its process gets the redirection without a package identity, so
+ * every start goes this way.
+ */
+async function startOutsideContainer(commandLine: string): Promise<number> {
+  const root = process.env.SystemRoot;
+  const powershell = root ? path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+  // The command line goes in through the environment, so it needs no quoting for PowerShell.
+  const script =
+    "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create " +
+    "-Arguments @{ CommandLine = $env:BROWSERDO_COMMAND_LINE }; " +
+    '"$($r.ReturnValue) $($r.ProcessId)"';
+  const { stdout } = await execFileAsync(
+    powershell,
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { windowsHide: true, timeout: 60_000, env: { ...process.env, BROWSERDO_COMMAND_LINE: commandLine } },
+  );
+  const [returnValue, pid] = stdout.trim().split(" ").map(Number);
+  if (returnValue !== 0 || !pid) {
+    throw new Error(`Win32_Process.Create returned ${stdout.trim()}`);
+  }
+  return pid;
+}
+
+/** Quote one argument so that a Windows program's command-line parsing gives it back unchanged. */
+export function quoteArg(arg: string): string {
+  if (arg !== "" && !/[\s"]/.test(arg)) return arg;
+  // Backslashes count only before a quote: double them there, then escape the quote.
+  return '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1") + '"';
+}
+
+async function runInstallerDirectly(installerPath: string): Promise<void> {
   try {
     await execFileAsync(installerPath, ["--silent"], { windowsHide: true, timeout: INSTALL_TIMEOUT_MS });
   } catch (error) {
@@ -286,8 +350,15 @@ async function runInstaller(installerPath: string): Promise<void> {
   }
 }
 
-/** A stuck installer is given up on after this long, so the install fails and the next call retries it. */
-const INSTALL_TIMEOUT_MS = 20 * 60_000;
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
 
 /** Poll the registry until the install is detected or we time out; returns the exe path or null. */
 async function waitForInstall(timeoutMs: number): Promise<string | null> {
@@ -427,18 +498,31 @@ async function isPortAlive(port: number): Promise<boolean> {
   }
 }
 
-/** Start the exe detached: non-blocking, and not killed when Node exits. */
-function launchExe(exePath: string): void {
+/**
+ * Start the exe outside the client's app container (startOutsideContainer), without waiting for it;
+ * BrowserDo finds it through its port file, not as its child.
+ */
+async function launchExe(exePath: string): Promise<void> {
   const args = SHARED_PROFILE ? SHARED_LAUNCH_ARGS : buildLaunchArgs();
-  // Launched through `cmd /c start` so the browser leaves the current console process group.
-  // Ctrl+C on the terminal then stops Node without taking the browser with it, which keeps
-  // the scene intact for debugging. (A plain spawn, even with detached:true, still receives
-  // Ctrl+C in a Windows console.)
-  const child = spawn(
-    "cmd",
-    ["/c", "start", '""', exePath, ...args],
-    { stdio: "ignore", windowsHide: true },
-  );
+  try {
+    await startOutsideContainer([exePath, ...args].map(quoteArg).join(" "));
+    return;
+  } catch (error) {
+    await appendDebugLog("embiody_browser", "could not start Embiody through WMI; starting it directly", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  // Through `cmd /c start` so the browser leaves the console process group: Ctrl+C on the
+  // terminal then stops Node without taking the browser with it. (A plain spawn, even with
+  // detached:true, still receives Ctrl+C in a Windows console.)
+  // This browser may still be inside the client's container, so it must not start the updater
+  // (EmbiodyUpdater --wake-all, 19 s after start): an updater there deletes its COM registration
+  // in the real registry and recreates it in the private one, breaking updates for good. The
+  // updater's own scheduled task still runs it.
+  const child = spawn("cmd", ["/c", "start", '""', exePath, ...args, "--disable-updater-scheduler"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
   child.unref();
 }
 
@@ -593,7 +677,7 @@ async function startEmbiodyBrowser(): Promise<number> {
     exePath,
     userDataDir: EMBIODY_USER_DATA_DIR,
   });
-  launchExe(exePath);
+  await launchExe(exePath);
   const port = await waitForPort(30_000);
   await appendDebugLog("embiody_browser", "Embiody ready", {
     port,

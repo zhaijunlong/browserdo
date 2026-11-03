@@ -51,7 +51,8 @@ export const EMBIODY_GITHUB_DOWNLOAD_BASE =
   "https://github.com/zhaijunlong/embiody-dist/releases/latest/download";
 /**
  * The statistics channel of the installer BrowserDo downloads: NPMX for the npm package; an mcpb
- * fixes its own at build time (scripts/build-mcpb.mjs --channel, e.g. CLDD for Claude Desktop).
+ * fixes its own at build time (scripts/build-mcpb.mjs --channel, e.g. CLDD for Claude Desktop);
+ * the Claude plugin sets BROWSERDO_CHANNEL in claude/plugin/.mcp.json.
  */
 export const EMBIODY_CHANNEL = process.env.BROWSERDO_CHANNEL || "NPMX";
 export const EMBIODY_INSTALLER_NAME = `EmbiodySetup-Offline-${EMBIODY_CHANNEL}.exe`;
