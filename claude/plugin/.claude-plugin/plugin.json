@@ -1,0 +1,20 @@
+{
+  "name": "browserdo",
+  "displayName": "BrowserDo",
+  "version": "0.9.3",
+  "description": "Lets Claude browse, click, type and read pages in Embiody, a Windows browser it works in alongside you, including sites you are signed in to. Windows 10 or 11 and Node.js 20+.",
+  "author": {
+    "name": "Embiody Studio",
+    "email": "connect@embiody.com",
+    "url": "https://embiody.com"
+  },
+  "homepage": "https://github.com/zhaijunlong/browserdo",
+  "repository": "https://github.com/zhaijunlong/browserdo",
+  "license": "Apache-2.0",
+  "keywords": ["browser", "browser-automation", "web", "windows", "mcp"],
+  "icon": "./icon.png",
+  "documentationUrl": "https://github.com/zhaijunlong/browserdo#readme",
+  "supportUrl": "https://github.com/zhaijunlong/browserdo/issues",
+  "privacyPolicyUrl": "https://embiody.com/privacy",
+  "termsOfServiceUrl": "https://embiody.com/eula"
+}

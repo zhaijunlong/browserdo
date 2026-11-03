@@ -1,5 +1,7 @@
 # BrowserDo
 
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/zhaijunlong/browserdo)
+
 **Built for AI agents. Shared with people.**
 
 [Embiody](https://embiody.com) is a Windows browser your AI agent works in, in the background and
