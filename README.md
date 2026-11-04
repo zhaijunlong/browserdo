@@ -2,6 +2,8 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/zhaijunlong/browserdo)
 
+![BrowserDo demo: Claude Code shops in Embiody, keeps going while minimized, and fills a checkout in one combo](assets/browserdo-demo.gif)
+
 **Built for AI agents. Shared with people.**
 
 [Embiody](https://embiody.com) is a Windows browser your AI agent works in, in the background and
@@ -9,8 +11,6 @@ at full speed, while you keep using your PC and can step in at any time. Browser
 [MCP](https://modelcontextprotocol.io) server that connects your agent to it. Add it to Claude
 Code, Claude Desktop, Codex, Cursor, VS Code or Gemini CLI, and your agent can browse, click, type
 and read pages, including sites you are signed in to.
-
-<!-- demo GIF here -->
 
 ## Why BrowserDo
 

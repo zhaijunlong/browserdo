@@ -2,6 +2,8 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/zhaijunlong/browserdo)
 
+![BrowserDo demo: Claude Code shops in Embiody, keeps going while minimized, and fills a checkout in one combo](https://raw.githubusercontent.com/zhaijunlong/browserdo/main/assets/browserdo-demo.gif)
+
 [Embiody](https://embiody.com) is a Windows browser your AI agent works in, in the background,
 while you keep using your PC and can step in at any time. This plugin connects Claude to it, so
 Claude can search, read pages, click, type and fill in forms, including on sites you are signed
