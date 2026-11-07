@@ -2,7 +2,7 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/zhaijunlong/browserdo)
 
-![BrowserDo demo: Claude Code shops in Embiody, keeps going while minimized, and fills a checkout in one combo](assets/browserdo-demo.gif)
+[![BrowserDo demo: the agent fills 4 form fields in 2.5 seconds, shops in its own tabs, keeps going while minimized, fills a checkout in one combo and hands you the tab to pay](assets/browserdo-demo.gif)](https://youtu.be/hIqfkx8bA98)
 
 **Built for AI agents. Shared with people.**
 
@@ -14,7 +14,13 @@ and read pages, including sites you are signed in to.
 
 ## Why BrowserDo
 
+Each point below has a short clip recorded on real sites. The side-by-side ones run the same task
+at the same moment through Playwright MCP and BrowserDo, from one Claude Code session.
+
 ### 1. Works in the background at full speed, and leaves your screen to you
+
+[![Chrome and Embiody countdowns in a background tab, behind a window and minimized](assets/readme/point-01.gif)](https://embiody.com/assets/video/points/point-01.mp4)
+*Chrome and Embiody countdowns in a background tab, behind a window and minimized. Click for the 38-second clip.*
 
 Pages run at full speed in background tabs, background windows, minimized windows and hidden
 windows. Your agent does not need the browser in front of you, so you keep using your computer
@@ -34,15 +40,22 @@ may come back without a screenshot; its text and element numbers are still there
 
 ### 2. Works where bots get blocked — because it isn't one
 
+[![Walmart, Target, adidas and realtor.com stop Playwright MCP with a bot check; Embiody goes straight through](assets/readme/point-02.gif)](https://embiody.com/assets/video/points/point-02.mp4)
+*Walmart, Target, adidas and realtor.com stop Playwright MCP with a bot check; Embiody goes straight through. Click for the 24-second clip.*
+
 Your agent works in your own browser, on your behalf, so sites with anti-bot protection treat it
-the way they treat you.
+the way they treat you. We also signed in to an account on a site protected by a leading
+commercial bot-detection service, the kind that usually stops automation tools.
 
 ### 3. Sees the whole page and clicks the right thing
 
-- Content inside embedded frames from other sites, such as payment forms and sign-in boxes, can
-  be read and clicked.
+[![On nytimes.com a privacy overlay swallows Playwright MCP’s click; BrowserDo gives the agent only the overlay’s buttons, so it closes it first](assets/readme/point-03.gif)](https://embiody.com/assets/video/points/point-03.mp4)
+*On nytimes.com a privacy overlay swallows Playwright MCP’s click; BrowserDo gives the agent only the overlay’s buttons, so it closes it first. Click for the 28-second clip.*
+
 - Elements covered by a popup or overlay get no number, so the agent can't click something you
   can't see.
+- Content inside embedded frames from other sites, such as payment forms and sign-in boxes, can
+  be read and clicked.
 - Long pages are read whole, not only the part on screen.
 - An element off screen is scrolled into view before it is clicked.
 - Clicks land where they should across multiple monitors and at any display scaling.
@@ -51,32 +64,57 @@ the way they treat you.
 
 ### 4. You can see what the agent is doing
 
+[![The "AI-controlled tab" badge, then the highlighted border and the agent’s own cursor](assets/readme/point-04.gif)](https://embiody.com/assets/video/points/point-04.mp4)
+*The "AI-controlled tab" badge, then the highlighted border and the agent’s own cursor. Click for the 15-second clip.*
+
 A tab the agent is working in shows a virtual mouse pointer, a frame around the page and a
 marker on the tab. Open it any time to watch.
 
-### 5. You and the agent share one browser without getting in each other's way
+### 5. You and the agent share one tab
 
-If you click or type in a tab the agent is working in, you are asked whether to take it over.
-The agent asks before it touches a tab of yours.
+[![Disputing a charge on Uber Help: the agent hands you the tab for the sign-in code, then takes it back](assets/readme/point-05.gif)](https://embiody.com/assets/video/points/point-05.mp4)
+*Disputing a charge on Uber Help: the agent hands you the tab for the sign-in code, then takes it back. Click for the 38-second clip.*
 
-### 6. Several steps in one call
+The agent fills in the forms; you step in for the sign-in code, the captcha or the payment, then
+hand the tab back, and the agent picks up where you left off. If you click or type in a tab the
+agent is working in, you are asked whether to take it over. The agent asks before it touches a
+tab of yours.
+
+### 6. Fewer tokens for the whole page
+
+[![Tokens per whole-page snapshot: Playwright MCP, Chrome DevTools MCP and BrowserDo on Wikipedia, GitHub, CNN, ESPN and Apple](assets/readme/point-06-tokens.jpg)](assets/readme/point-06-tokens.jpg)
+
+The browser engine itself boils each page down for the agent: its text, plus every element the
+agent can act on, numbered. On Wikipedia, GitHub, CNN, ESPN and Apple, a whole-page snapshot took
+37% of the tokens of Playwright MCP's (o200k tokenizer, same 1600×1000 viewport, November 2026),
+and the agent can read just the screen it is working on.
+
+### 7. Several steps in one call
+
+[![Real speed: the agent fills 4 form fields in 2.5 seconds with one call](assets/readme/point-07.gif)](https://embiody.com/assets/video/points/point-07.mp4)
+*Real speed: the agent fills 4 form fields in 2.5 seconds with one call. Click for the 3-second clip.*
 
 `browser_batch` runs several actions (clicks, typing, key presses) in a row and returns a fresh
 snapshot of the page, so the agent needs fewer round trips and fewer tokens.
 
-### 7. Reads the page itself, not a summary
+### 8. Reads the page itself, not a summary
+
+[![A JB Hi-Fi search page: Claude Code’s built-in fetch gets a browser warning and 0 products; BrowserDo reads all 18 with prices](assets/readme/point-08.gif)](https://embiody.com/assets/video/points/point-08.mp4)
+*A JB Hi-Fi search page: Claude Code’s built-in fetch gets a browser warning and 0 products; BrowserDo reads all 18 with prices. Click for the 30-second clip.*
 
 `browser_read_pages` returns the page's own text, links included, from pages built by scripts and
-from sites you are signed in to. It can stand in for Claude Code's WebFetch, which returns a short
-model-written summary. In our comparison of 8 pages, BrowserDo read a BBC News article that
-WebFetch could not fetch, and read all 8 pages in parallel in about 20 seconds.
+from sites you are signed in to. It can stand in for Claude Code's WebFetch, which fetches the page
+without running its scripts and hands back a short model-written summary.
 
-### 8. Sees the browser's own popups
+### 9. Sees the browser's own popups
+
+[![McDonald’s store finder asks for your location: Playwright MCP’s agent never sees the prompt; BrowserDo reports it and the agent allows it once](assets/readme/point-09.gif)](https://embiody.com/assets/video/points/point-09.mp4)
+*McDonald’s store finder asks for your location: Playwright MCP’s agent never sees the prompt; BrowserDo reports it and the agent allows it once. Click for the 30-second clip.*
 
 Permission bubbles, menus, Save As dialogs, "Leave site?" prompts and alerts are reported in every
 snapshot, with the ways each one can be answered.
 
-### 9. Current engine, signed releases
+### 10. Current engine, signed releases
 
 Built on Chromium 156. Releases are signed, and the browser updates itself, checking the
 signature of every update.
