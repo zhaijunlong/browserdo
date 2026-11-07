@@ -430,6 +430,8 @@ export interface TabSnapshotFailure {
    * error page is a second reason recapturing is pointless, independent of the message text.
    */
   pageType?: string;
+  /** The tab answered, with no elements. */
+  empty?: boolean;
 }
 
 /**

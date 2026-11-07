@@ -1455,10 +1455,10 @@ describe("browser-actions: which capture failures are not worth retrying", () =>
     );
     assert.match(
       A.explainEmptySnapshot("1001", "This page reported no elements at all. … snapshot it again …"),
-      /not rendered yet/,
+      /drawn nothing so far.*snapshot it again/s,
     );
     // An old kernel gives no message, and there still has to be something to say.
-    assert.match(A.explainEmptySnapshot("1001", undefined), /not rendered yet/);
+    assert.match(A.explainEmptySnapshot("1001", undefined), /drawn nothing so far.*snapshot it again/s);
   });
 
   it("the translated sentence must not be used to judge: it no longer holds the kernel's own words", () => {

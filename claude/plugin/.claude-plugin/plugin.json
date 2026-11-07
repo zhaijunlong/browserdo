@@ -1,7 +1,7 @@
 {
   "name": "browserdo",
   "displayName": "BrowserDo",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "Lets Claude browse, click, type and read pages in Embiody, a Windows browser it works in alongside you, including sites you are signed in to. Windows 10 or 11 and Node.js 20+.",
   "author": {
     "name": "Embiody Studio",

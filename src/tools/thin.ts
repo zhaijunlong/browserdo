@@ -30,8 +30,10 @@ import {
   browserStopHumanControl,
   browserWait,
   describePageType,
+  snapshotRetryIsPointless,
   takeSnapshots,
 } from "../browser-actions.js";
+import type { SnapshotBatchResult } from "../browser-actions.js";
 import { footnoteList, footnotesIn, renderAnnotatedContent, renderWithLinks } from "../annotated_content.js";
 import { MAX_SNAPSHOT_TABS } from "../runtime_types.js";
 import type { TabSnapshot, WindowInfo } from "../runtime_types.js";
@@ -244,6 +246,35 @@ const READ_PAGE_TIMEOUT_MS = 15_000;
 const READ_PAGE_MAX_CHARS = 15_000;
 /** The kernel's deadline for reading a whole page (87000px took 1.7-3.7s). */
 const READ_PAGE_SNAPSHOT_MS = 20_000;
+/** How often a page that loaded but drew nothing is looked at again. */
+const READ_PAGE_EMPTY_RETRY_MS = 500;
+
+/**
+ * Snapshot, then snapshot the empty tabs again until they draw or `until` passes: the snapshot
+ * waits only for the load, and pages built by scripts draw after it. about:blank is not retried.
+ */
+async function snapshotUntilDrawn(
+  cdp: CdpClient,
+  targets: Parameters<typeof takeSnapshots>[1]["targets"],
+  until: number,
+): Promise<SnapshotBatchResult> {
+  const batch = await takeSnapshots(cdp, { targets, timeoutMs: READ_PAGE_SNAPSHOT_MS });
+  for (;;) {
+    const empty = new Set(
+      batch.failures.filter((f) => f.empty && !snapshotRetryIsPointless(f)).map((f) => f.tabId),
+    );
+    if (empty.size === 0 || Date.now() + READ_PAGE_EMPTY_RETRY_MS > until) return batch;
+    await new Promise((r) => setTimeout(r, READ_PAGE_EMPTY_RETRY_MS));
+    // A failed retry keeps the pages already read.
+    const again = await takeSnapshots(cdp, {
+      targets: targets.filter((t) => empty.has(t.tabId)),
+      timeoutMs: READ_PAGE_SNAPSHOT_MS,
+    }).catch(() => undefined);
+    if (!again) return batch;
+    batch.failures = batch.failures.filter((f) => !empty.has(f.tabId)).concat(again.failures);
+    batch.snapshots.push(...again.snapshots);
+  }
+}
 
 /**
  * Up to max characters of text from `from`, ending at a line break when the part has one and
@@ -555,7 +586,7 @@ export function registerThinBrowserTools(
         .number()
         .optional()
         .describe(
-          `How long each page may take to load, default ${READ_PAGE_TIMEOUT_MS}. A page still ` +
+          `How long each page may take to load and draw, default ${READ_PAGE_TIMEOUT_MS}. A page still ` +
             "loading then is read as it stands, and says so.",
         ),
       from: z
@@ -575,6 +606,7 @@ export function registerThinBrowserTools(
       const win = await resolveTarget(cdp, windowId, undefined);
       if (isTargetError(win)) return errorReply(win.error);
       const deadline = timeoutMs ?? READ_PAGE_TIMEOUT_MS;
+      const started = Date.now();
 
       // TODO: put these tabs in a tab group of their own once the kernel has tab groups.
       const opened = await Promise.all(
@@ -596,7 +628,7 @@ export function registerThinBrowserTools(
         );
         const batch =
           targets.length > 0
-            ? await takeSnapshots(cdp, { targets, timeoutMs: READ_PAGE_SNAPSHOT_MS })
+            ? await snapshotUntilDrawn(cdp, targets, started + deadline)
             : undefined;
         // The snapshot reply has no title; only the layout knows it.
         const titles = new Map(
@@ -612,7 +644,11 @@ export function registerThinBrowserTools(
           if (!tabId) return `${head}\nnot read: ${opened[i].text}`;
           const shot = batch?.snapshots.find((s) => s.tabId === tabId);
           if (!shot) {
-            const reason = batch?.failures.find((f) => f.tabId === tabId)?.reason;
+            const failure = batch?.failures.find((f) => f.tabId === tabId);
+            const reason =
+              failure?.empty && !snapshotRetryIsPointless(failure)
+                ? `the page loaded but had drawn nothing ${Date.now() - started} ms after it was opened. A page built by scripts may need longer (raise timeoutMs); otherwise it is empty`
+                : failure?.reason;
             return `${head}\nnot read: ${reason ?? "no snapshot came back"}`;
           }
           read++;

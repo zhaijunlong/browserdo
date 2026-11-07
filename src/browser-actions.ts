@@ -1757,6 +1757,7 @@ export async function takeSnapshots(
           // Carry the kernel's own words so isDeterministicSnapshotFailure can classify it.
           raw: message ?? "empty element list",
           pageType: readPageType(r),
+          empty: true,
         });
         continue;
       }
@@ -1967,7 +1968,7 @@ export function explainEmptySnapshot(
   if (message && /is about:blank/i.test(message)) {
     return `Tab ${tabId} is a blank page (about:blank) with nothing to act on. Give it an address with browserNavigate before looking at it again`;
   }
-  return `Tab ${tabId} came back with an empty element list this round. The page has most likely not rendered yet, which happens when the machine is busy, so leave it alone this round`;
+  return `Tab ${tabId} has no elements yet: the page has drawn nothing so far. Pages built by scripts draw a moment after they load, and a busy machine draws late, so snapshot it again shortly; if it stays empty, the page is empty`;
 }
 
 /** Translate a kernel capture error into something the model can change approach on. */

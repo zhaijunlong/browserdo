@@ -12,7 +12,7 @@ in to.
 ## What is inside
 
 - **The BrowserDo MCP server** ([source](https://github.com/zhaijunlong/browserdo)), started with
-  `npx -y browserdo-mcp@0.9.4` from the npm package
+  `npx -y browserdo-mcp@0.9.5` from the npm package
   [`browserdo-mcp`](https://www.npmjs.com/package/browserdo-mcp).
 - **The `browserdo` skill**, which tells Claude how to use the browser tools well: snapshot the
   page first and act by element number, batch several steps in one call, read pages with BrowserDo

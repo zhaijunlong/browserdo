@@ -8,21 +8,21 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/zhaijunlong/browserdo#readme",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "browserdo-mcp",
-      "version": "0.9.4",
+      "version": "0.9.5",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/zhaijunlong/browserdo/releases/download/v0.9.4/browserdo-mcp-cldd-0.9.4.mcpb",
-      "version": "0.9.4",
-      "fileSha256": "cdaa5c0f1fbac206c1e5b0917bc34cf7b53af5171be1eaf10dc967727fe169a9",
+      "identifier": "https://github.com/zhaijunlong/browserdo/releases/download/v0.9.5/browserdo-mcp-cldd-0.9.5.mcpb",
+      "version": "0.9.5",
+      "fileSha256": "2fc38b57dc4cebe92cde3c3bbe26a81b505653590274153e2a9b9b8b6264e869",
       "transport": {
         "type": "stdio"
       }

@@ -26,7 +26,7 @@ export function createMcpServer(
 ): McpServer {
   const mcpServer = new McpServer({
     name: "browserdo",
-    version: "0.9.4",
+    version: "0.9.5",
   }, {
     instructions: instructionsFor(toolSet, installing),
     capabilities: {

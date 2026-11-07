@@ -715,6 +715,56 @@ describe("thin tool layer", () => {
       assert.doesNotMatch(text, /call again/);
     });
 
+    describe("a page that loaded but has drawn nothing", () => {
+      const EMPTY = { annotatedContent: JSON.stringify({ children: [] }) };
+      const NOT_DRAWN = "This page reported no elements at all. ... snapshot it again before concluding that it is empty.";
+      const tabsAsked = () =>
+        cdp.callsTo("Embiody.browserTakeSnapshot").map((c) => (c.params as any).targets[0].tabs.map((t: any) => t.tabId));
+
+      it("is snapshotted again, alone, until it draws", async () => {
+        openTabsInOrder();
+        let round = 0;
+        cdp.on("Embiody.browserTakeSnapshot", (p: Record<string, unknown>) => {
+          round++;
+          return snapshotReply(p, {}, (tabId) => (tabId === "2001" && round < 3 ? { ...EMPTY, message: NOT_DRAWN } : undefined));
+        });
+        const result = await tools.get("browser_read_pages")!({ urls: ["https://maps.example/", "https://b.example/"] });
+        assert.equal(result.isError, false, textOf(result));
+        assert.match(textOf(result), /Read 2 of 2 pages/);
+        assert.deepEqual(tabsAsked(), [["2001", "2002"], ["2001"], ["2001"]]);
+      });
+
+      it("a failed retry keeps the pages already read", async () => {
+        openTabsInOrder();
+        let round = 0;
+        cdp.on("Embiody.browserTakeSnapshot", (p: Record<string, unknown>) =>
+          ++round > 1 ? new Error("boom") : snapshotReply(p, {}, (tabId) => (tabId === "2001" ? { ...EMPTY, message: NOT_DRAWN } : undefined)),
+        );
+        const result = await tools.get("browser_read_pages")!({ urls: ["https://maps.example/", "https://b.example/"] });
+        assert.equal(result.isError, false, textOf(result));
+        assert.match(textOf(result), /Read 1 of 2 pages/);
+      });
+
+      it("still empty when timeoutMs runs out: says so, not that the machine is busy", async () => {
+        openTabsInOrder();
+        cdp.on("Embiody.browserTakeSnapshot", (p: Record<string, unknown>) => snapshotReply(p, { ...EMPTY, message: NOT_DRAWN }));
+        const text = textOf(await tools.get("browser_read_pages")!({ urls: ["https://blank.example/"], timeoutMs: 1200 }));
+        assert.match(text, /not read: the page loaded but had drawn nothing \d+ ms after it was opened/);
+        assert.doesNotMatch(text, /busy/);
+        assert.ok(tabsAsked().length >= 2);
+      });
+
+      it("about:blank is not snapshotted again: the browser says another snapshot will say the same", async () => {
+        openTabsInOrder();
+        cdp.on("Embiody.browserTakeSnapshot", (p: Record<string, unknown>) =>
+          snapshotReply(p, { ...EMPTY, message: "This page is about:blank, so there is nothing on it to number. Another snapshot will say the same." }),
+        );
+        const text = textOf(await tools.get("browser_read_pages")!({ urls: ["about:blank"] }));
+        assert.equal(tabsAsked().length, 1);
+        assert.match(text, /about:blank/);
+      });
+    });
+
     it("closes the tabs even when the snapshot command itself fails", async () => {
       openTabsInOrder();
       cdp.on("Embiody.browserTakeSnapshot", () => new Error("renderer gone"));
