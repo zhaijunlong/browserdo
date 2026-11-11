@@ -50,7 +50,7 @@ const manifest = {
     "On first use BrowserDo downloads and installs the Embiody browser (about 140 MB).",
   author: { name: "Embiody Studio", email: "connect@embiody.com", url: "https://embiody.com" },
   repository: { type: "git", url: "https://github.com/zhaijunlong/browserdo" },
-  homepage: "https://github.com/zhaijunlong/browserdo",
+  homepage: "https://embiody.com/browserdo/",
   documentation: "https://github.com/zhaijunlong/browserdo#readme",
   support: "https://github.com/zhaijunlong/browserdo/issues",
   license: pkg.license,

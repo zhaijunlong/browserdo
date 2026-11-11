@@ -1,5 +1,7 @@
 # BrowserDo
 
+Website: [embiody.com/browserdo](https://embiody.com/browserdo/)
+
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/zhaijunlong/browserdo)
 
 [![BrowserDo demo: the agent fills 4 form fields in 2.5 seconds, shops in its own tabs, keeps going while minimized, fills a checkout in one combo and hands you the tab to pay](assets/browserdo-demo.gif)](https://youtu.be/hIqfkx8bA98)
