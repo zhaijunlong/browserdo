@@ -45,7 +45,8 @@ const RULES: Array<{ what: string; re: RegExp; files?: (f: string) => boolean }>
     // The browser checkout's protocol file is where the contract tests read it; its docs are internal.
     re: /docs\/internal|docs\/embiody|issue-tracking|for-callers|embiody_chromium|embiody\/src\/(?!chrome\/browser\/devtools\/embiody_protocol\.pdl)/,
   },
-  { what: "a person's account", re: /zhaij(?!unlong\/(?:embiody-dist|browserdo)\b)|selectious(?!\/embiody\/release\/)|@163\.com|business@/i },
+  // SELECTIOUS PTY LTD is the company that signs the installer, named on purpose.
+  { what: "a person's account", re: /zhaij(?!unlong\/(?:embiody-dist|browserdo)\b)|selectious(?!\/embiody\/release\/| pty ltd)|@163\.com|business@/i },
   {
     what: "Chinese or Japanese outside the data files",
     re: /[\u3040-\u30ff\u4e00-\u9fff]/,

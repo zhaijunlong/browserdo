@@ -24,6 +24,9 @@ const OTHER_CHANNEL_URL = `${CNB_DIR}/EmbiodySetup-Offline-OTHER.exe`;
 const SUMS_URL = `${EMBIODY_GITHUB_DOWNLOAD_BASE}/SHA256SUMS.txt`;
 const GITHUB_EXE_URL = `${EMBIODY_GITHUB_DOWNLOAD_BASE}/${EMBIODY_INSTALLER_NAME}`;
 
+/** The fake installers carry no signature; the check itself is tested in installer-signature.test.ts. */
+const signed = async () => {};
+
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 const goodSums = `${sha256(Buffer.from("other"))}  EmbiodyBrowserUpdate-1.crx3\n${sha256(GITHUB_EXE)}  ${EMBIODY_INSTALLER_NAME}\n`;
 
@@ -96,7 +99,7 @@ describe("downloading the installer", () => {
 
   it("takes GitHub's installer when its checksum matches, without touching cnb", async () => {
     serve({ [SUMS_URL]: goodSums, [GITHUB_EXE_URL]: GITHUB_EXE, ...cnbRoutes });
-    assert.equal(await downloadInstaller(dest), "github");
+    assert.equal(await downloadInstaller(dest, undefined, signed), "github");
     assert.deepEqual(await readFile(dest), GITHUB_EXE);
     assert.ok(!requested.some((u) => u.includes("cnb")));
   });
@@ -110,31 +113,44 @@ describe("downloading the installer", () => {
   for (const [name, github] of failures) {
     it(`falls back to cnb when ${name}`, async () => {
       serve({ ...github, ...cnbRoutes });
-      assert.equal(await downloadInstaller(dest), "cnb");
+      assert.equal(await downloadInstaller(dest, undefined, signed), "cnb");
       assert.deepEqual(await readFile(dest), CNB_EXE);
     });
   }
 
   it("takes this channel's installer from cnb when latest= names another channel's", async () => {
     serve({ [SUMS_URL]: 404, ...cnbRoutes, [EMBIODY_RELEASES_PAGE_URL]: latest(OTHER_CHANNEL_URL) });
-    assert.equal(await downloadInstaller(dest), "cnb");
+    assert.equal(await downloadInstaller(dest, undefined, signed), "cnb");
     assert.deepEqual(await readFile(dest), CNB_EXE);
   });
 
   it("refuses cnb's installer when its checksum does not match", async () => {
     serve({ [SUMS_URL]: 404, ...cnbRoutes, [CNB_EXE_URL]: Buffer.from("tampered") });
-    await assert.rejects(downloadInstaller(dest), /cnb: .*Checksum mismatch/);
+    await assert.rejects(downloadInstaller(dest, undefined, signed), /cnb: .*Checksum mismatch/);
+  });
+
+  it("falls back to cnb when GitHub's installer is not signed by us, and runs neither unsigned", async () => {
+    serve({ [SUMS_URL]: goodSums, [GITHUB_EXE_URL]: GITHUB_EXE, ...cnbRoutes });
+    const onlyCnb = async (file: string) => {
+      if (!(await readFile(file)).equals(CNB_EXE)) throw new Error("The installer was not run: unsigned");
+    };
+    assert.equal(await downloadInstaller(dest, undefined, onlyCnb), "cnb");
+    assert.deepEqual(await readFile(dest), CNB_EXE);
+
+    const none = async () => { throw new Error("The installer was not run: unsigned"); };
+    await assert.rejects(downloadInstaller(dest, undefined, none), /GitHub: .*not run.*; cnb: .*not run/);
+    await assert.rejects(readFile(dest), { code: "ENOENT" }, "a refused installer is not left on disk");
   });
 
   it("names both failures when cnb fails too", async () => {
     serve({ [SUMS_URL]: 404, [EMBIODY_RELEASES_PAGE_URL]: 503 });
-    await assert.rejects(downloadInstaller(dest), /GitHub: .*404.*; cnb: .*503/);
+    await assert.rejects(downloadInstaller(dest, undefined, signed), /GitHub: .*404.*; cnb: .*503/);
   });
 
   it("falls back to cnb when GitHub stops sending", async () => {
     serve({ [SUMS_URL]: goodSums, [GITHUB_EXE_URL]: trickle(1000, 10, 5, 1), ...cnbRoutes });
     const limits = { stallMs: 100, slowCheckMs: 60_000, slowTotalMs: 600_000 };
-    assert.equal(await downloadInstaller(dest, limits), "cnb");
+    assert.equal(await downloadInstaller(dest, limits, signed), "cnb");
     assert.deepEqual(await readFile(dest), CNB_EXE);
   });
 
@@ -142,14 +158,14 @@ describe("downloading the installer", () => {
     // 10 bytes every 10 ms of 1 MB: about 17 minutes in all, against a limit of 1 s.
     serve({ [SUMS_URL]: goodSums, [GITHUB_EXE_URL]: trickle(1_000_000, 10, 10, Infinity), ...cnbRoutes });
     const started = Date.now();
-    assert.equal(await downloadInstaller(dest, { stallMs: 1000, slowCheckMs: 100, slowTotalMs: 1000 }), "cnb");
+    assert.equal(await downloadInstaller(dest, { stallMs: 1000, slowCheckMs: 100, slowTotalMs: 1000 }, signed), "cnb");
     assert.ok(Date.now() - started >= 100, "not judged before slowCheckMs");
   });
 
   it("reports the download's source and progress in the install status", async () => {
     const big = Buffer.alloc(3 * 1024 * 1024);
     serve({ [SUMS_URL]: 404, ...cnbRoutes, [CNB_SUMS_URL]: cnbSums(big), [CNB_EXE_URL]: big });
-    await downloadInstaller(dest);
+    await downloadInstaller(dest, undefined, signed);
     assert.match(installProgress()!, /from cnb \(3 (of 3 MB|MB so far)/);
   });
 });

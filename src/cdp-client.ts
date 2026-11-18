@@ -2,6 +2,20 @@ import WebSocket from "ws";
 import { BROWSER_UPDATE_URL, BrowserVersionError, checkEmbiodyVersion, type VersionVerdict } from "./browser_version.js";
 import { CDP_COMMAND_TIMEOUT_MS } from "./config.js";
 
+/**
+ * Commands the kernel may hold to ask the person first (close their tab, use their tab, take
+ * control back). Before doing anything it may wait 15 s for another question in the window and
+ * then 10 s for the answer, so these get that long on top of their own time.
+ */
+const ASKS_PERSON = new Set([
+  "browserCloseWindow", "browserCloseTab", "browserStopHumanControl",
+  "browserSelectTab", "browserNavigate", "browserGoBack", "browserGoForward", "browserReload",
+  "browserStopLoading", "browserSetAudioMuted", "browserClick", "browserMove", "browserDrag",
+  "browserInputText", "browserSelectEditableText", "browserPressKey", "browserScroll",
+  "browserClosePopupBubble",
+].map((m) => `Embiody.${m}`));
+const PERSON_ASK_MAX_MS = 25_000;
+
 interface PendingCommand {
   resolve: (value: any) => void;
   reject: (reason: any) => void;
@@ -96,7 +110,8 @@ export class CdpClient {
       }
       throw new BrowserVersionError(this.version.message);
     }
-    return this.send(method, params, timeoutMs);
+    const ask = ASKS_PERSON.has(method) ? PERSON_ASK_MAX_MS : 0;
+    return this.send(method, params, (timeoutMs ?? CDP_COMMAND_TIMEOUT_MS) + ask);
   }
 
   private send(method: string, params?: object, timeoutMs?: number): Promise<any> {

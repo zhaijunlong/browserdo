@@ -66,11 +66,53 @@ function errorMessage(error: unknown): string {
  * When the command succeeded but the page shifted under its feet, the kernel attaches a
  * message (the element moved, or was scrolled into view) and suggests snapshotting again.
  * It must reach the model verbatim: the action took effect, but the snapshot it holds is stale.
+ * Also carries the note that the person was asked first.
  */
 function withKernelMessage(text: string, result: any): string {
   const message =
     typeof result?.message === "string" ? result.message.trim() : "";
-  return message ? `${text}; kernel note: ${message}` : text;
+  return (message ? `${text}; kernel note: ${message}` : text) + promptNote(result);
+}
+
+/** extraInfo.humanPrompt: present when the kernel asked the person before acting. */
+interface HumanPrompt {
+  outcome: string;
+  joined?: boolean;
+  queuedMs?: number;
+}
+
+function humanPrompt(result: any): HumanPrompt | undefined {
+  const p = result?.extraInfo?.humanPrompt;
+  return typeof p?.outcome === "string" ? p : undefined;
+}
+
+const OUTCOMES: Record<string, string> = {
+  answered: "they answered",
+  dismissed: "they closed the question without answering",
+  timedOut: "nobody answered before it timed out",
+  gaveUp:
+    "they could not be asked, as another question in this window was up for 15 s. That is not a refusal; try again later",
+  withdrawn: "the question was withdrawn: the tab was closed or moved, or its window closed, before an answer",
+};
+
+/** Tell the model the person was asked, and when they are busy at this window. */
+function promptNote(result: any): string {
+  const p = humanPrompt(result);
+  if (!p) return "";
+  const busy = p.joined || (p.queuedMs ?? 0) > 0;
+  return (
+    `. The person was asked first${p.joined ? " (the same question was already up)" : ""}` +
+    `${(p.queuedMs ?? 0) > 0 ? ` after waiting ${Math.round(p.queuedMs! / 1000)} s behind another question` : ""}: ` +
+    `${OUTCOMES[p.outcome] ?? `outcome ${p.outcome}`}` +
+    (busy ? ". They are busy at this window; leave their tabs in it alone for now" : "")
+  );
+}
+
+/** Append promptNote to a result and keep the raw field in data. */
+function withPrompt(res: ActionResult, result: any): ActionResult {
+  const p = humanPrompt(result);
+  if (!p) return res;
+  return { ...res, text: res.text + promptNote(result), data: { ...res.data, humanPrompt: p } };
 }
 
 /**
@@ -441,7 +483,7 @@ export async function browserNavigate(
   } catch (error) {
     return { ok: false, text: `Navigation failed: ${errorMessage(error)}` };
   }
-  return describeNavigation(`Navigate to ${params.url}`, reply, target);
+  return withPrompt(describeNavigation(`Navigate to ${params.url}`, reply, target), reply);
 }
 
 /**
@@ -585,7 +627,7 @@ async function goHistory(
   // Going back is often a same-document navigation (an anchor, or a history entry the page
   // pushed itself), which does not load, repaint or change the title, so loadStatus is
   // committed — that is a normal arrival, not "only got halfway".
-  return describeNavigation(intent, reply, target);
+  return withPrompt(describeNavigation(intent, reply, target), reply);
 }
 
 /** Reload the current page (wrapping Embiody.browserReload). A form page refuses to resubmit by default; see formResubmission. */
@@ -622,11 +664,11 @@ export async function browserReload(
   } catch (error) {
     return { ok: false, text: `Reload failed: ${errorMessage(error)}` };
   }
-  return describeNavigation(
+  return withPrompt(describeNavigation(
     `Reload the page${params.bypassCache ? " (bypassing cache)" : ""}`,
     reply,
     target,
-  );
+  ), reply);
 }
 
 /**
@@ -652,13 +694,13 @@ export async function browserStopLoading(
   } catch (error) {
     return { ok: false, text: `Stopping the load failed: ${errorMessage(error)}` };
   }
-  return {
+  return withPrompt({
     ok: true,
     text: result?.wasLoading
       ? "Loading stopped; the tab stays on whatever content had arrived. This is not a navigation and the page does not change"
       : "Nothing to stop: this tab had already finished loading",
     data: { wasLoading: !!result?.wasLoading },
-  };
+  }, result);
 }
 
 /**
@@ -696,22 +738,28 @@ export async function browserSetAudioMuted(
       text: `The mute result cannot be confirmed: the kernel reply has no muted field (${JSON.stringify(result).slice(0, 200)})`,
     };
   }
-  return {
+  return withPrompt({
     ok: true,
     text: result.muted ? "Tab muted" : "Tab unmuted",
     data: { muted: result.muted },
-  };
+  }, result);
 }
 
 /**
  * Why a close that replied success:false left the tab or window there. The kernel replies once
- * it is gone, or after 10 s.
+ * it is gone, or after 10 s. Without humanPrompt it was the page's own "Leave site?".
  */
-const STILL_OPEN =
-  "a person was asked and declined, or the page asked \"Leave site?\" and it was not answered " +
-  "within 10 s. That question is for a person: hand the tab over with " +
-  "browser_start_human_control, or leave it open. Do not send the close again: a second " +
-  "close while the question is up closes the page without asking, losing what it wanted kept";
+function stillOpen(result: any): string {
+  const p = humanPrompt(result);
+  if (!p) {
+    return "the page asked \"Leave site?\" and it was not answered within 10 s. That question is " +
+      "for a person: hand the tab over with browser_start_human_control, or leave it open. Do not " +
+      "send the close again: a second close while the question is up closes the page without " +
+      "asking, losing what it wanted kept";
+  }
+  if (p.outcome === "gaveUp" || p.outcome === "withdrawn") return OUTCOMES[p.outcome];
+  return `it is the person's, they were asked and ${p.outcome === "answered" ? "kept it" : OUTCOMES[p.outcome] ?? p.outcome}. Leave it open`;
+}
 
 /**
  * Close a tab (wrapping Embiody.browserCloseTab). The kernel replies once the tab is gone, so
@@ -739,14 +787,14 @@ export async function browserCloseTab(
     const layout = await browserGetWindowInfo(cdp).catch(() => undefined);
     if (layout && !findTab(layout, target.windowId, target.tabId)) {
       const w = layout.find((x) => x.windowId === target.windowId);
-      return { ok: true, text: `Tab closed (${w ? w.tabs.length : 0} remaining)` };
+      return withPrompt({ ok: true, text: `Tab closed (${w ? w.tabs.length : 0} remaining)` }, result);
     }
-    return { ok: false, text: `The tab is still open: ${STILL_OPEN}` };
+    return { ok: false, text: `The tab is still open: ${stillOpen(result)}`, data: { humanPrompt: humanPrompt(result) } };
   }
-  return {
+  return withPrompt({
     ok: true,
     text: `Tab closed (${result.remainingTabsCount ?? "?"} remaining)`,
-  };
+  }, result);
 }
 
 /** Close a browser window (wrapping Embiody.browserCloseWindow, which takes windowId). Replies as browserCloseTab does. */
@@ -769,25 +817,27 @@ export async function browserCloseWindow(
   if (!result?.success) {
     const layout = await browserGetWindowInfo(cdp).catch(() => undefined);
     if (layout && !layout.some((w) => w.windowId === win.windowId)) {
-      return { ok: true, text: `Closed browser window windowId=${win.windowId}` };
+      return withPrompt({ ok: true, text: `Closed browser window windowId=${win.windowId}` }, result);
     }
-    return { ok: false, text: `The window is still open: ${STILL_OPEN}` };
+    return { ok: false, text: `The window is still open: ${stillOpen(result)}`, data: { humanPrompt: humanPrompt(result) } };
   }
-  return { ok: true, text: `Closed browser window windowId=${win.windowId}` };
+  return withPrompt({ ok: true, text: `Closed browser window windowId=${win.windowId}` }, result);
 }
 
 /**
  * Make a tab the one its window shows (wrapping Embiody.browserSelectTab). Not needed before a
- * snapshot: background tabs and hidden windows are captured as they are. Throws on failure.
+ * snapshot: background tabs and hidden windows are captured as they are. Throws on failure; returns
+ * the note that the person was asked first, or "".
  */
 export async function browserSelectTab(
   cdp: CdpClient,
   params: { windowId: string; tabId: string },
-): Promise<void> {
-  await cdp.sendCommand("Embiody.browserSelectTab", {
+): Promise<string> {
+  const result = await cdp.sendCommand("Embiody.browserSelectTab", {
     windowId: params.windowId,
     tabId: params.tabId,
   });
+  return promptNote(result);
 }
 
 /**
@@ -900,12 +950,12 @@ export async function browserClosePopupBubble(
       ? result.appliedAction
       : undefined;
   if (!result?.closed) {
-    return {
+    return withPrompt({
       ok: true,
       // Not "there was none": a page's "Leave site?" question is up yet not closable (F0, measured).
       text: "Nothing was closed: no popup, bubble or menu this command can close is open. A page's own \"Leave site?\" question is not one of them; that needs a person",
       data: { closed: false },
-    };
+    }, result);
   }
   const applied = appliedAction
     ? `; applied ${appliedAction} to the permission bubble${
@@ -914,11 +964,11 @@ export async function browserClosePopupBubble(
           : ""
       }`
     : "";
-  return {
+  return withPrompt({
     ok: true,
     text: `Popup closed${types ? ` (${types})` : ""}${applied}`,
     data: { closed: true, types: result.types, appliedAction },
-  };
+  }, result);
 }
 
 /**
@@ -991,11 +1041,15 @@ export async function browserStopHumanControl(
   }
   const reason = String(result?.reason ?? "");
   if (!result?.success) {
-    return {
+    const p = humanPrompt(result);
+    if (p && (p.outcome === "gaveUp" || p.outcome === "withdrawn")) {
+      return { ok: false, text: `Control was not taken back: ${OUTCOMES[p.outcome]}`, data: { reason, humanPrompt: p } };
+    }
+    return withPrompt({
       ok: false,
       text: `Taking control back was refused (reason=${reason || "unknown"}): a human took this tab over deliberately and has not given it back. The task cannot continue automatically`,
       data: { reason },
-    };
+    }, result);
   }
   if (reason === "none") {
     return {
@@ -1004,11 +1058,11 @@ export async function browserStopHumanControl(
       data: { reason },
     };
   }
-  return {
+  return withPrompt({
     ok: true,
     text: `Control taken back (the earlier handover came from ${reason === "userTookOver" ? "a human taking over" : "the agent handing over"}); automation can continue`,
     data: { reason },
-  };
+  }, result);
 }
 
 /**

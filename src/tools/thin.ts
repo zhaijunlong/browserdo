@@ -1097,9 +1097,10 @@ export function registerThinBrowserTools(
       tabId: z.string().describe("The tab to bring forward."),
     },
     async ({ windowId, tabId }) => {
-      // browserSelectTab returns void and signals failure by throwing.
+      // browserSelectTab signals failure by throwing.
+      let note: string;
       try {
-        await browserSelectTab(cdp, { windowId, tabId });
+        note = await browserSelectTab(cdp, { windowId, tabId });
       } catch (error) {
         return errorReply(
           `Selecting the tab failed: ${
@@ -1108,7 +1109,7 @@ export function registerThinBrowserTools(
         );
       }
       return {
-        content: [{ type: "text" as const, text: `Tab ${tabId} is now in front.` }],
+        content: [{ type: "text" as const, text: `Tab ${tabId} is now in front${note}.` }],
       };
     },
   );

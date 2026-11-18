@@ -1368,6 +1368,33 @@ describe("browser-actions：browserCloseTab", () => {
     assert.equal(r.ok, true);
     assert.match(r.text, /0 remaining/);
   });
+
+  it("asked the person, sharing a question already up: the model hears they are busy at this window", async () => {
+    const cdp = cdpWith({
+      "Embiody.browserCloseTab": {
+        success: true, remainingTabsCount: 2,
+        extraInfo: { humanPrompt: { outcome: "answered", joined: true, queuedMs: 0 } },
+      },
+    });
+    const r = await A.browserCloseTab(cdp.asCdp(), { ...TARGET });
+    assert.equal(r.ok, true);
+    assert.match(r.text, /asked first.*already up.*answered.*busy/);
+    assert.equal((r.data?.humanPrompt as any)?.joined, true);
+  });
+
+  it("gaveUp is not a refusal: say to try again", async () => {
+    const cdp = cdpWith({
+      "Embiody.browserCloseTab": {
+        success: false, remainingTabsCount: 2,
+        extraInfo: { humanPrompt: { outcome: "gaveUp", joined: false, queuedMs: 15000 } },
+      },
+      "Embiody.browserGetWindowInfo": () => ({ windows: [{ windowId: TARGET.windowId, tabs: [{ tabId: TARGET.tabId }] }] }),
+    });
+    const r = await A.browserCloseTab(cdp.asCdp(), { ...TARGET });
+    assert.equal(r.ok, false);
+    assert.match(r.text, /not a refusal; try again later/);
+    assert.doesNotMatch(r.text, /Leave site/);
+  });
 });
 
 describe("browser-actions：browserWait", () => {

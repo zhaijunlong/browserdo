@@ -119,7 +119,8 @@ cdp:
   host: localhost
   # Per-command CDP timeout. Do not go below 10000: browserInputText waits up to
   # 10 seconds to confirm input focus while the renderer is busy, and a client that
-  # times out first cuts off a call that would have succeeded.
+  # times out first cuts off a call that would have succeeded. Commands that may
+  # ask the person first (close their tab, use their tab) get 25 s more.
   commandTimeoutMs: 30000
 
 # Debugging

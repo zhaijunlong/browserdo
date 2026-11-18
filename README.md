@@ -118,8 +118,9 @@ snapshot, with the ways each one can be answered.
 
 ### 10. Current engine, signed releases
 
-Built on Chromium 156. Releases are signed, and the browser updates itself, checking the
-signature of every update.
+Built on Chromium 156. The installer carries the digital signature of SELECTIOUS PTY LTD, which
+BrowserDo verifies before running it, and the browser updates itself, checking the signature of
+every update.
 
 ## Requirements
 
@@ -287,7 +288,9 @@ answers this machine only.
 BrowserDo has no telemetry, usage statistics or error reporting.
 
 - **Downloads**: the first time it starts without Embiody installed, it downloads the installer
-  from GitHub, or from a mirror if GitHub can't be reached.
+  from GitHub, or from a mirror if GitHub can't be reached. The installer carries the digital
+  signature of SELECTIOUS PTY LTD; BrowserDo checks it before running the installer and refuses
+  one that is unsigned or signed by anyone else.
 - **Updates**: when your client starts BrowserDo with `npx`, npm checks the npm registry for the
   latest version when it starts BrowserDo. That request is made by npm, not by BrowserDo.
 - **Your model**: only `browser_run_task` sends anything to a model, and only to the endpoint you

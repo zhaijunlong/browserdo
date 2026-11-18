@@ -12,7 +12,7 @@ in to.
 ## What is inside
 
 - **The BrowserDo MCP server** ([source](https://github.com/zhaijunlong/browserdo)), started with
-  `npx -y browserdo-mcp@0.9.5` from the npm package
+  `npx -y browserdo-mcp@0.9.6` from the npm package
   [`browserdo-mcp`](https://www.npmjs.com/package/browserdo-mcp).
 - **The `browserdo` skill**, which tells Claude how to use the browser tools well: snapshot the
   page first and act by element number, batch several steps in one call, read pages with BrowserDo
@@ -44,7 +44,8 @@ BrowserDo in the desktop app's Chat, install the Claude Desktop extension
 - **npm**: `npx` fetches the `browserdo-mcp` package from the npm registry to start it.
 - **First start**: if Embiody is not installed, BrowserDo downloads the Embiody installer from
   GitHub (or a mirror if GitHub can't be reached) and installs it for your Windows user, without
-  administrator rights.
+  administrator rights. The installer carries the digital signature of SELECTIOUS PTY LTD, which
+  BrowserDo verifies before running it.
 - **Browser updates**: the Embiody browser updates itself, checking the signature of every update.
 - **No telemetry**: BrowserDo sends no usage statistics or error reports. The browser tools return
   pages only to Claude.

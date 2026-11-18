@@ -154,6 +154,7 @@ export const CDP_DEFAULT_HOST = process.env.EMBIODY_CDP_HOST ?? "localhost";
  * How long to wait for one CDP command. **Must not go below 10s**: browserInputText waits up
  * to 10 seconds for input focus on a busy renderer, and timing out first cuts off a call that
  * was going to succeed. Click and input add a hit-test round trip on top, so leave room.
+ * Commands that may ask the person first get 25 s more (cdp-client.ts, ASKS_PERSON).
  */
 export const CDP_COMMAND_TIMEOUT_MS = Number(
   process.env.EMBIODY_CDP_COMMAND_TIMEOUT_MS ?? 30_000,

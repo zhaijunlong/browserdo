@@ -217,6 +217,7 @@ async function downloadVerified(
   limits: DownloadLimits,
   onProgress: OnProgress,
   giveUpIfSlow: boolean,
+  verify: (file: string) => Promise<void>,
 ): Promise<void> {
   await appendDebugLog("embiody_browser", "downloading installer", { url: `${base}/${EMBIODY_INSTALLER_NAME}` });
   const sums = (await fetchBytes(`${base}/SHA256SUMS.txt`, limits)).toString("utf8");
@@ -235,20 +236,61 @@ async function downloadVerified(
   }
   await appendDebugLog("embiody_browser", "installer checksum verified", { sha256: actual });
   await writeFile(dest, buffer);
+  try {
+    await verify(dest);
+  } catch (error) {
+    await safeUnlink(dest);
+    throw error;
+  }
+}
+
+/** Who signs the Embiody installer; anything else is not run. */
+export const EMBIODY_SIGNER = "SELECTIOUS PTY LTD";
+
+/**
+ * The checksum comes from the same folder as the installer, so it proves the download is whole,
+ * not that we published it. The Authenticode signature does: it must be valid and its signer
+ * must be EMBIODY_SIGNER.
+ */
+async function verifyInstallerSignature(file: string): Promise<void> {
+  const windows = process.env.SystemRoot;
+  if (!windows) throw new Error("The installer was not run: SystemRoot is not set, so its signature could not be checked");
+  const powershell = path.join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const { stdout } = await execFileAsync(
+    powershell,
+    [
+      "-NoProfile", "-NonInteractive", "-Command",
+      "$s = Get-AuthenticodeSignature -LiteralPath $env:BROWSERDO_INSTALLER; $s.Status; $s.SignerCertificate.Subject",
+    ],
+    { windowsHide: true, timeout: 60_000, env: { ...process.env, BROWSERDO_INSTALLER: file } },
+  );
+  const problem = signatureProblem(stdout);
+  if (problem) throw new Error(`The installer was not run: ${problem}`);
+  await appendDebugLog("embiody_browser", "installer signature verified", { signer: EMBIODY_SIGNER });
+}
+
+/** Read Get-AuthenticodeSignature's status and subject lines; null when the signature is good. */
+export function signatureProblem(stdout: string): string | null {
+  const [status = "", subject = ""] = stdout.split(/\r?\n/).map((l) => l.trim());
+  if (status !== "Valid") return `its digital signature is not valid (${status || "no status"})`;
+  const cn = subject.split(/,\s*/).find((p) => p.startsWith("CN="))?.slice(3);
+  if (cn !== EMBIODY_SIGNER) return `it is signed by ${cn ?? "an unnamed signer"}, not ${EMBIODY_SIGNER}`;
+  return null;
 }
 
 /**
  * Download the newest installer to dest: GitHub first; on any failure there (network error,
- * HTTP error, checksum mismatch, stalled or too slow) fall back to the same file in cnb's newest
+ * HTTP error, checksum mismatch, bad signature, stalled or too slow) fall back to the same file in cnb's newest
  * release. Returns the source it came from.
  */
 export async function downloadInstaller(
   dest: string,
   limits: DownloadLimits = DOWNLOAD_LIMITS,
+  verify: (file: string) => Promise<void> = verifyInstallerSignature,
 ): Promise<"github" | "cnb"> {
   let githubError: unknown;
   try {
-    await downloadVerified(EMBIODY_GITHUB_DOWNLOAD_BASE, dest, limits, trackDownload("GitHub"), true);
+    await downloadVerified(EMBIODY_GITHUB_DOWNLOAD_BASE, dest, limits, trackDownload("GitHub"), true, verify);
     return "github";
   } catch (err) {
     githubError = err;
@@ -260,7 +302,7 @@ export async function downloadInstaller(
     const onProgress = trackDownload("cnb");
     // latest= may name another channel's installer; only its release folder is taken from it.
     const url = await resolveLatestInstallerUrl();
-    await downloadVerified(url.slice(0, url.lastIndexOf("/")), dest, limits, onProgress, false);
+    await downloadVerified(url.slice(0, url.lastIndexOf("/")), dest, limits, onProgress, false, verify);
     return "cnb";
   } catch (err) {
     throw new Error(
