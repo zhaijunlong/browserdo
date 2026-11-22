@@ -248,7 +248,7 @@ Add a local (stdio) MCP server in your client's settings, with command `npx` and
 The `browserdo` skill tells your agent when and how to use these tools, for example to search
 with BrowserDo instead of a built-in search tool. BrowserDo installs it the first time it starts
 (see Privacy). To install it on its own, for example before adding BrowserDo, run
-`npx skills add zhaijunlong/browserdo -g` (the `skills` command needs Node.js 22.20 or newer). An
+`npx skills add zhaijunlong/browserdo -g` (the `skills` command needs Node.js 22.20 or newer and Git). An
 agent that has the skill but not the tools offers to add BrowserDo for you.
 
 Then ask your agent to do something on the web:
