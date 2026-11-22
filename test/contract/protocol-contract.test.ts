@@ -11,6 +11,7 @@ import {
   RUNTIME_ANSWERED_ACTIONS,
   RuntimeActionNameSchema,
 } from "../../src/runtime_types.js";
+import { ASKS_PERSON } from "../../src/cdp-client.js";
 import { discoverWorkingTarget } from "../../src/embiody-browser.js";
 import { FakeCdp } from "../helpers/fake-cdp.js";
 import { happyRoutes, TARGET } from "../helpers/fixtures.js";
@@ -302,6 +303,14 @@ describe("protocol contract (checked against embiody_protocol.pdl)", { skip: pdl
       }
     }
     assert.deepEqual(problems, [], problems.join("\n"));
+  });
+
+  it("the commands given extra time to ask the person are exactly those whose reply may carry extraInfo", () => {
+    const asking = [...pdl.commands]
+      .filter(([, spec]) => names(spec.returns).includes("extraInfo"))
+      .map(([name]) => `Embiody.${name}`)
+      .sort();
+    assert.deepEqual([...ASKS_PERSON].sort(), asking);
   });
 
   it("PopupInfo's fields match the pdl", () => {

@@ -8,7 +8,7 @@ process.env.EMBIODY_DEBUG_LOG = path.join(os.tmpdir(), "browserdo-test", String(
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { createMcpServer } = await import("../../src/server.js");
-const { onInstallRecheck, setInstallStatus } = await import("../../src/install_status.js");
+const { getInstallStatus, onInstallRecheck, setInstallStatus } = await import("../../src/install_status.js");
 import type { CdpClient } from "../../src/cdp-client.js";
 
 type Reply = { content: Array<{ text: string }>; isError?: boolean };
@@ -69,6 +69,39 @@ describe("tools while the browser is being installed", () => {
     setInstallStatus({ phase: "failed", error: "cnb: HTTP 503" });
     assert.doesNotMatch((await call("browser_get_window_info")).content[0].text, /Nothing was done/);
     await client.close();
+  });
+
+  it("right after startup a tool waits for the install check, then answers by what it found", async () => {
+    setInstallStatus({ phase: "checking" });
+    const { client, call } = await connect();
+    assert.match((await call("browser_status")).content[0].text, /checking whether the Embiody browser is installed/);
+    let answered = false;
+    const reply = call("browser_get_window_info").finally(() => (answered = true));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(answered, false);
+    setInstallStatus({ phase: "downloading", source: "GitHub", received: 0, total: null, startedAt: Date.now() });
+    assert.match((await reply).content[0].text, /being downloaded from GitHub.*Nothing was done/);
+    await client.close();
+  });
+
+  it("a tool waiting for the install check goes ahead once the browser is found", async () => {
+    setInstallStatus({ phase: "checking" });
+    const { client, call } = await connect({ isConnected: false, versionProblem: null });
+    const reply = call("browser_get_window_info");
+    setInstallStatus({ phase: "idle" });
+    assert.doesNotMatch((await reply).content[0].text, /Nothing was done/);
+    await client.close();
+  });
+
+  it("a startup check that throws does not leave tools waiting", async () => {
+    process.env.EMBIODY_EXE_PATH = path.join(os.tmpdir(), "no-such-dir", "embiody.exe");
+    try {
+      const { ensureEmbiodyInstalled } = await import("../../src/embiody-browser.js");
+      await assert.rejects(ensureEmbiodyInstalled(), /does not exist/);
+      assert.equal(getInstallStatus().phase, "idle");
+    } finally {
+      delete process.env.EMBIODY_EXE_PATH;
+    }
   });
 
   it("browser_wait waits and adds the progress, not as an error", async () => {

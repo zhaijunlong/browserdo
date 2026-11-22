@@ -233,6 +233,17 @@ async function main() {
     ProtocolMismatchError,
   } = await import("./embiody-browser.js");
   const { CDP_DEFAULT_HOST } = await import("./config.js");
+  const { appendDebugLog } = await import("./logger.js");
+  const { installAgentSkills } = await import("./agent_skills.js");
+
+  // Not where BrowserDo cannot work: the skill would send agents to tools that only say so.
+  // In the background: a failure here only means agents miss the skill, never that BrowserDo stops.
+  if (process.platform === "win32") {
+    installAgentSkills().then(
+      (result) => appendDebugLog("skills", "agent skills", result),
+      (error) => appendDebugLog("skills", "agent skills failed", String(error)),
+    );
+  }
 
   const host = cdpHost ?? CDP_DEFAULT_HOST;
   // Finding a restarted browser reads this machine's port file and may start the browser here,

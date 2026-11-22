@@ -69,6 +69,10 @@ const manifest = {
 writeFileSync(path.join(stage, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 copyFileSync(path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
 copyFileSync(path.join(root, "assets", "icon.png"), path.join(stage, "icon.png"));
+// At the same path relative to the server as in the npm package (src/agent_skills.ts).
+const skillDir = path.join("claude", "plugin", "skills", "browserdo");
+mkdirSync(path.join(stage, skillDir), { recursive: true });
+copyFileSync(path.join(root, skillDir, "SKILL.md"), path.join(stage, skillDir, "SKILL.md"));
 
 const file = path.join(out, `browserdo-mcp-${channel.toLowerCase()}-${pkg.version}.mcpb`);
 const cli = path.join(root, "node_modules", "@anthropic-ai", "mcpb", "dist", "cli", "cli.js");

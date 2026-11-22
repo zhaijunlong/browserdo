@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import express from "express";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { localhostHostValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -10,9 +10,10 @@ import {
 } from "@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { CdpClient } from "./cdp-client.js";
+import { refuseUnknownArgs } from "./strict_args.js";
 import { withInstallNotice } from "./install_notice.js";
 import { appendDebugLog } from "./logger.js";
-import { canInstall, installProgress, recheckFailedInstall } from "./install_status.js";
+import { canInstall, installChecked, installProgress, recheckFailedInstall } from "./install_status.js";
 import { registerAllTools, type ToolSet } from "./tools/index.js";
 import { instructionsFor } from "./server_instructions.js";
 
@@ -26,7 +27,7 @@ export function createMcpServer(
 ): McpServer {
   const mcpServer = new McpServer({
     name: "browserdo",
-    version: "0.9.6",
+    version: "0.9.7",
   }, {
     instructions: instructionsFor(toolSet, installing),
     capabilities: {
@@ -45,13 +46,18 @@ export function createMcpServer(
 
   // Every tool call passes through here: until the browser is installed a tool replies with the
   // progress at once instead of acting, and the first reply after an install carries the notice.
-  // browser_run_task is registered as a task, not here; its run waits for the install instead.
-  const register = mcpServer.tool.bind(mcpServer) as (...a: unknown[]) => unknown;
+  // An unknown parameter name is refused before that. browser_run_task is registered as a task,
+  // not here; its run waits for the install instead.
+  const register = mcpServer.tool.bind(mcpServer) as (...a: unknown[]) => RegisteredTool;
   mcpServer.tool = ((...a: unknown[]) => {
     const name = a[0] as string;
     const handler = a[a.length - 1] as (...args: unknown[]) => Promise<CallToolResult>;
     a[a.length - 1] = async (...args: unknown[]) => {
-      if (!NO_BROWSER_NEEDED.has(name)) await recheckFailedInstall();
+      if (!NO_BROWSER_NEEDED.has(name)) {
+        // Right after startup: wait for the check rather than send someone with a browser away.
+        await installChecked();
+        await recheckFailedInstall();
+      }
       const progress = NO_BROWSER_NEEDED.has(name) ? null : installProgress();
       if (progress) {
         return {
@@ -65,7 +71,9 @@ export function createMcpServer(
       if (still) result.content = [...(result.content ?? []), { type: "text", text: still }];
       return withInstallNotice(result);
     };
-    return register(...a);
+    const tool = register(...a);
+    refuseUnknownArgs(name, tool);
+    return tool;
   }) as typeof mcpServer.tool;
 
   registerAllTools(mcpServer, cdpClient, toolSet);

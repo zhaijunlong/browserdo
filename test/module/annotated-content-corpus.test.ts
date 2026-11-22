@@ -18,7 +18,7 @@ import { describe, it } from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 
-import { renderAnnotatedContent } from "../../src/annotated_content.js";
+import { collectEmsn, renderAnnotatedContent } from "../../src/annotated_content.js";
 import {
   FLAT_GROUP_LIMIT,
   worstFlatGroup,
@@ -150,8 +150,9 @@ describe("the annotatedContent renderer, against real snapshot corpus", () => {
       })(tree);
 
       const rendered = renderAnnotatedContent(tree);
+      // At a line's start, or a link in a sentence: [words](#12).
       const got = new Set(
-        [...rendered.matchAll(/^\t*(\d+) /gm)].map((m) => m[1]),
+        [...rendered.matchAll(/^\t*(\d+) |\]\(#(\d+)\)/gm)].map((m) => m[1] ?? m[2]),
       );
       const missing = [...want].filter((e) => !got.has(e));
       if (missing.length) {
@@ -159,6 +160,9 @@ describe("the annotatedContent renderer, against real snapshot corpus", () => {
           `${path.basename(f)} is missing ${missing.length} numbers (such as ${missing.slice(0, 5).join(", ")})`,
         );
       }
+      // The gate lets through exactly what the text shows.
+      const gate = [...collectEmsn(tree)].sort();
+      if (gate.join() !== [...got].sort().join()) bad.push(`${path.basename(f)}: the gate's numbers differ from the text's`);
     }
     assert.deepEqual(
       bad.slice(0, 5),
@@ -193,7 +197,11 @@ describe("the annotatedContent renderer, against real snapshot corpus", () => {
           // others as they are.
           const v = k === "value" ? JSON.stringify(String(x[k])) : raw;
           checked++;
-          if (!rendered.includes(v)) bad.push(`${path.basename(f)} lost ${k}=${JSON.stringify(raw)}`);
+          if (rendered.includes(v)) continue;
+          // A word in a sentence drops a name that only repeats it ("wiktionary:grid" on "grid").
+          const words = [...everyText(x)].join(" ");
+          if (k === "label" && words && raw.toLowerCase().includes(words.toLowerCase()) && rendered.includes(words)) continue;
+          bad.push(`${path.basename(f)} lost ${k}=${JSON.stringify(raw)}`);
         }
         for (const c of x.children ?? []) walk(c);
       })(tree);

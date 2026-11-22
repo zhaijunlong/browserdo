@@ -10,17 +10,17 @@ import type { ToolSet } from "./tool_set.js";
  */
 export const INSTRUCTIONS_MAX = 2000;
 
-const BROWSER_TOOLS = `Search the web and read pages with these tools, not a built-in web search or fetch tool (WebSearch, WebFetch): you get the page's own text, not another model's summary, including pages built by scripts and sites the person is signed in to.
-- Read: pass the URLs to browser_read_pages, several at once.
-- Search: open the engine's or the site's home page with browser_new_tab and type the query into its search box (browser_input_text, pressEnter); a results URL opened directly often meets a captcha. Snapshot the results with showLinks and pass the addresses of the results (not ads) to browser_read_pages; redirect addresses are fine. A result with no address: middle-click it and snapshot the new tab with tabIds.
+const BROWSER_TOOLS = `Search the web and read pages with these tools, not a built-in web search or fetch tool (WebSearch, WebFetch): you get the page's own text, not another model's summary, even of script-built pages and sites the person is signed in to.
+- Read: pass URLs to browser_read_pages, several at once.
+- Search: open the engine's or site's home page with browser_new_tab and type the query into its search box (browser_input_text, pressEnter); a results URL opened directly often meets a captcha. Snapshot the results with showLinks and pass their addresses (not ads; redirects are fine) to browser_read_pages. A result with no address: middle-click it and snapshot the new tab with tabIds.
 - Sign-in, payment and captchas are for a person; never solve a captcha yourself. browser_start_human_control hands the tab over; snapshot until they are done, then browser_stop_human_control. With no one to answer, stop and say so.
 
-To act on a page: browser_take_snapshot, act by the element numbers (emsn) with its snapshotId, snapshot again. Prefer browser_batch, even for one action: it returns the fresh snapshot. Snapshot before acting on an element an earlier step makes appear.
+To act on a page: browser_take_snapshot, act by element number (emsn) with its snapshotId, snapshot again. Prefer browser_batch, even for one action: it returns the fresh snapshot. Snapshot before acting on an element an earlier step makes appear.
 - "12 INPUT:text [name] ="value"": 12 is the emsn; hint "..." is a placeholder, not a value. "·" lines are text only; a Tab indent means inside the line above. Offscreen elements are acted on by number too.
-- Ask for includeImage when the look matters: which option is selected, greyed-out dates, a chart.
+- Ask for includeImage when the look matters: a selected option, greyed-out dates, a chart.
 - Clear "popups blocking this tab" with browser_close_popup_bubble first. Values already in a form are left over: check them. Set a SELECT or date field with browser_input_text.
 
-Other sessions may share this browser: work in tabs you opened with browser_new_tab and pass their tabId to every call that acts on a tab.`;
+Other sessions may share this browser: work in tabs you opened with browser_new_tab, or one the person says is open (browser_get_window_info finds it); pass the tabId to every call on a tab.`;
 
 const TASK_TOOLS = `browser_run_task runs a whole task given in plain language with its own model, pausing for a person at sign-in, payment and captchas; browser_stop_task stops it.`;
 

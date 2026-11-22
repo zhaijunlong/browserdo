@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { CdpClient } from "../cdp-client.js";
 import { appendDebugLog } from "../logger.js";
@@ -37,6 +37,8 @@ import type { SnapshotBatchResult } from "../browser-actions.js";
 import { footnoteList, footnotesIn, renderAnnotatedContent, renderWithLinks } from "../annotated_content.js";
 import { MAX_SNAPSHOT_TABS } from "../runtime_types.js";
 import type { TabSnapshot, WindowInfo } from "../runtime_types.js";
+import { strictArgs } from "../strict_args.js";
+import { changedLines, findElement, onScreen, pageHasText } from "../batch_conditions.js";
 
 /**
  * The thin tool layer: one MCP tool per browser action, so the host agent runs the loop
@@ -137,6 +139,71 @@ function checkEmsnShown(
 }
 
 /**
+ * What recent snapshots rendered, by snapshotId, their tab, and whether they read around the
+ * screen too: "changes" and changesSince are against one of them.
+ */
+interface Rendered { rendered: string; long: boolean; tabId: string }
+const renderedById = new Map<string, Rendered>();
+const RENDERED_KEPT = 50;
+
+function rememberRendered(shot: TabSnapshot, long: boolean): void {
+  renderedById.delete(shot.snapshotId);
+  renderedById.set(shot.snapshotId, { rendered: shot.rendered, long, tabId: shot.tabId });
+  if (renderedById.size > RENDERED_KEPT) renderedById.delete(renderedById.keys().next().value!);
+}
+
+/**
+ * A snapshot for our own rules (a wait, a find): around the screen too, as what is waited for or
+ * aimed at may be below it; no picture. A failure is its reason.
+ */
+async function lookAt(
+  cdp: CdpClient,
+  target: { windowId: string; tabId: string },
+  timeoutMs?: number,
+): Promise<TabSnapshot | string> {
+  try {
+    const batch = await takeSnapshots(cdp, { targets: [{ ...target, image: false, long: true }], timeoutMs });
+    const shot = batch.snapshots[0];
+    if (!shot) return batch.failures[0]?.reason ?? "no snapshot came back";
+    rememberRendered(shot, true);
+    return shot;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+const WAIT_TEXT_DEFAULT_MS = 5000;
+const WAIT_TEXT_MAX_MS = 30_000;
+const WAIT_TEXT_EVERY_MS = 500;
+
+/** Snapshot every half second until text is on the tab (or, gone, off it), or the time is up. */
+async function waitForText(
+  cdp: CdpClient,
+  target: { windowId: string; tabId: string },
+  text: string,
+  gone: boolean,
+  timeoutMs?: number,
+): Promise<ActionResult> {
+  const limit = Math.min(Math.max(timeoutMs ?? WAIT_TEXT_DEFAULT_MS, 100), WAIT_TEXT_MAX_MS);
+  const started = Date.now();
+  let failure = "";
+  for (;;) {
+    const shot = await lookAt(cdp, target, Math.max(limit - (Date.now() - started), 100));
+    failure = typeof shot === "string" ? shot : "";
+    if (typeof shot !== "string" && pageHasText(shot.annotatedContent, text) !== gone) {
+      return { ok: true, text: `"${text}" ${gone ? "is gone" : "is on the page"} after ${Date.now() - started}ms` };
+    }
+    const left = limit - (Date.now() - started);
+    if (left <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(WAIT_TEXT_EVERY_MS, left)));
+  }
+  return {
+    ok: false,
+    text: `"${text}" ${gone ? "still on the page" : "not on the page"} after ${limit}ms${failure ? ` (the last snapshot failed: ${failure})` : ""}`,
+  };
+}
+
+/**
  * Fill in windowId / tabId when the caller left them out.
  *
  * The kernel requires both. Making the host look the layout up before every action costs a
@@ -214,6 +281,16 @@ function describeLayout(layout: WindowInfo[]): string {
   return lines.join("\n");
 }
 
+/**
+ * The pageType line, for a PDF, error or crashed page. The browser's note on such a page says
+ * what the page is, so when that note is shown our own explanation is left out.
+ */
+function pageTypeLine(pageType: string | undefined, browserNoteShown: boolean): string[] {
+  const kind = describePageType(pageType);
+  if (!kind) return [];
+  return [browserNoteShown ? `pageType: ${pageType}` : `pageType: ${pageType} — ${kind}`];
+}
+
 /** One snapshot as the host reads it. */
 function describeShot(shot: TabSnapshot, includeImage: boolean, format?: "text" | "json", links = false): string {
   const parts = [
@@ -223,8 +300,8 @@ function describeShot(shot: TabSnapshot, includeImage: boolean, format?: "text" 
     `url: ${shot.url}`,
     `title: ${shot.title}`,
   ];
-  const kind = describePageType(shot.pageType);
-  if (kind) parts.push(`pageType: ${shot.pageType} — ${kind}`);
+  const browserNote = shot.loadingMessage || (includeImage && shot.noImageReason);
+  parts.push(...pageTypeLine(shot.pageType, !!browserNote));
   if (shot.loadingMessage) parts.push(`note: ${shot.loadingMessage}`);
   if (includeImage && shot.noImageReason) parts.push(`no image: ${shot.noImageReason}`);
   if (shot.popups.length > 0) {
@@ -308,9 +385,8 @@ function describeReadPage(p: {
   const lines = [p.head];
   if (shot.url && shot.url !== p.url) lines.push(`landed at: ${shot.url}`);
   if (p.title) lines.push(`title: ${p.title}`);
-  const kind = describePageType(shot.pageType);
-  if (kind) lines.push(`pageType: ${shot.pageType} — ${kind}`);
   const loadStatus = String(opened.data?.loadStatus ?? "");
+  lines.push(...pageTypeLine(shot.pageType, loadStatus === "loaded" && !!shot.loadingMessage));
   if (loadStatus !== "loaded") {
     lines.push(
       loadStatus === "failed"
@@ -319,6 +395,9 @@ function describeReadPage(p: {
           ? `note: nothing had arrived after ${deadline} ms; what is read below is what the tab showed then.`
           : `note: read before the page finished loading (after ${deadline} ms it had reached ${loadStatus || "an unknown stage"})`,
     );
+  } else if (shot.loadingMessage) {
+    // The browser's own note (frames still loading, a PDF...). It speaks of snapshots; this tab is closed.
+    lines.push(`note: ${shot.loadingMessage} (The tab is closed now: where this says to snapshot again, read the page again.)`);
   }
   const { text, links } = renderWithLinks(shot.annotatedContent, { numbers: false, links: true });
   if (p.from >= text.length && p.from > 0) {
@@ -389,6 +468,42 @@ export const BATCHABLE = [
   "browser_minimize",
 ] as const;
 
+/** A batch step's find: the element showing a text, in place of its emsn. */
+const FIND = strictArgs("find", {
+  text: z.string().min(1),
+  tag: z.string().min(1).optional(),
+  nth: z.number().int().min(1).optional(),
+});
+
+/**
+ * A snapshot reply cut to what changed since the snapshot `before`: its heading lines, then the
+ * changed lines, over the part of the page this reply covers. The whole reply, saying why, when
+ * there is nothing of that page to compare with (`none`: why when no snapshot was given).
+ * `old` is what `before` rendered, looked up when the call began.
+ */
+function changesOnly(
+  reply: string,
+  before: string | undefined,
+  old: Rendered | undefined,
+  none = "changes need the snapshotId they are from",
+): string {
+  const cut = reply.indexOf("\n\n");
+  const after = /^snapshotId: (\S+)$/m.exec(reply)?.[1];
+  const [head, body] = cut < 0 ? [reply, ""] : [reply.slice(0, cut), reply.slice(cut + 2)];
+  const whole = (why: string) => `${head}\nthe whole snapshot: ${why}\n\n${body}`;
+  if (!before) return whole(none);
+  if (!old) return whole(`snapshot ${before} is no longer kept`);
+  if (!after || pageOf(after) !== pageOf(before)) return whole(`this is another page than the one ${before} is from`);
+  const now = renderedById.get(after);
+  const narrowed = old.long && now !== undefined && !now.long;
+  const { text, added, gone } = changedLines(narrowed ? onScreen(old.rendered) : old.rendered, now?.rendered ?? body);
+  const since = narrowed ? `${before} (its lines on the screen)` : before;
+  if (!added && !gone) return `${head}\nno line changed since ${since}`;
+  // After a scroll most lines are new and gone alike, and the whole is the shorter read.
+  if (text.length >= body.length) return whole(`the changes since ${since} are longer than it`);
+  return `${head}\nchanges since ${since}: ${added} new or changed (+), ${gone} gone (-); unchanged lines left out but those the new ones sit in\n\n${text}`;
+}
+
 /** Batch steps after which the snapshot's numbers no longer apply. */
 const NAVIGATING = new Set<string>(["browser_navigate", "browser_go_back", "browser_go_forward", "browser_reload"]);
 
@@ -429,9 +544,10 @@ export function registerThinBrowserTools(
     tool: {
       value: (...a: unknown[]) => {
         handlers.set(a[0] as string, a[a.length - 1] as Handler);
-        const shape = a.length >= 4 ? a[a.length - 2] : undefined;
-        if (shape && typeof shape === "object") shapes.set(a[0] as string, shape as z.ZodRawShape);
-        return register(...a);
+        const tool = register(...a) as RegisteredTool;
+        const shape = (tool.inputSchema as { shape?: z.ZodRawShape } | undefined)?.shape;
+        if (shape) shapes.set(a[0] as string, shape);
+        return tool;
       },
     },
   }) as McpServer;
@@ -443,7 +559,8 @@ export function registerThinBrowserTools(
     "browser_take_snapshot",
     "Look at a tab: returns one line per element, the page position, the tab's URL and " +
       "title, any popups blocking it, and a snapshotId. Every actionable element carries a " +
-      "number (emsn) at the start of its line — act on the number, never on pixel " +
+      "number (emsn) at the start of its line; a link inside a sentence stays in it as " +
+      "[words](#12), number 12 — act on the number, never on pixel " +
       "coordinates. Take a fresh snapshot after anything that changes the page, to see what it " +
       "became: elements that appear have no number until then. Says so when the page is a PDF, " +
       "a browser error page or a crashed tab, each of which makes the obvious next move " +
@@ -494,10 +611,23 @@ export function registerThinBrowserTools(
             "it on when you need addresses: to hand search results to browser_read_pages, or to " +
             "see where a link goes. A page may change a link on click; to be sure of the address, open it.",
         ),
+      changesSince: z
+        .array(z.string())
+        .min(1)
+        .optional()
+        .describe(
+          "snapshotIds of earlier snapshots, at most one per tab: each tab then gives only the lines " +
+            "new or changed (+) and gone (-) since its own, with the lines they sit in. A tab with " +
+            "none, on another page now, or whose changes would be longer than it, comes whole and says why. " +
+            "Not with showLinks or format json.",
+        ),
       timeoutMs: z.number().optional().describe("How long to wait for the page to settle."),
     },
-    async ({ windowId, tabId, tabIds, includeImage, readWholePage, showLinks, format, timeoutMs }) => {
+    async ({ windowId, tabId, tabIds, includeImage, readWholePage, showLinks, format, changesSince, timeoutMs }) => {
       if (tabId && tabIds) return errorReply("Give tabId or tabIds, not both.");
+      if (changesSince && (showLinks || format === "json")) {
+        return errorReply("changesSince compares the plain lines; take it without showLinks and format json.");
+      }
 
       // The snapshot reply has no title; only the layout knows it. Missing a title is no reason to fail the snapshot.
       let targets: Array<{ windowId: string; tabId: string; title?: string }>;
@@ -519,6 +649,18 @@ export function registerThinBrowserTools(
             .find((t) => t.tabId === target.tabId)?.title;
         targets = [{ ...target, title }];
       }
+
+      // Each earlier snapshot goes to the tab it was taken in.
+      const sinceByTab = new Map<string, [string, Rendered]>();
+      for (const id of changesSince ?? []) {
+        const old = renderedById.get(id);
+        if (!old) continue;
+        const twin = sinceByTab.get(old.tabId)?.[0];
+        if (twin) return errorReply(`changesSince has ${twin} and ${id}, both of tab ${old.tabId}; give one per tab.`);
+        sinceByTab.set(old.tabId, [id, old]);
+      }
+      const lost = (changesSince ?? []).filter((id) => !renderedById.has(id));
+      const noSince = `none of changesSince is from this tab${lost.length ? ` (${lost.join(", ")} no longer kept)` : ""}`;
 
       let batch;
       try {
@@ -551,7 +693,10 @@ export function registerThinBrowserTools(
           continue;
         }
         recordSnapshot(shot.tabId, shot.snapshotId, shot.emsnLines);
-        content.push({ type: "text", text: describeShot(shot, includeImage, format, showLinks === true) });
+        rememberRendered(shot, readWholePage === true);
+        const text = describeShot(shot, includeImage, format, showLinks === true);
+        const since = sinceByTab.get(t.tabId);
+        content.push({ type: "text", text: changesSince ? changesOnly(text, since?.[0], since?.[1], noSince) : text });
         if (includeImage && shot.annotatedImage) {
           content.push({ type: "image", data: shot.annotatedImage, mimeType: "image/png" });
         }
@@ -689,9 +834,9 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_get_window_info",
-    "List every browser window and its tabs, with the windowId and tabId of each. Use it to " +
-      "find out what is open; the other tools default to the frontmost window and tab, so you " +
-      "usually do not need to call this first.",
+    "List every browser window and its tabs, with the windowId and tabId of each. When the " +
+      "person says a page is already open, call this to find its tab and work there rather than " +
+      "opening it again: they may have got it to a state that takes steps to reach.",
     {},
     async () => {
       try {
@@ -758,7 +903,8 @@ export function registerThinBrowserTools(
       "selection) are ignored. Not found, or found in several places without occurrence: nothing " +
       "is typed and the places are listed. The text is read back afterwards and the reply quotes " +
       "the changed lines; if they differ (the editor reformatted it), it fails saying the text was " +
-      "typed. Without these, text goes in at the caret; the element is clicked first unless focus is already in it.",
+      "typed. Without these, text goes in at the caret; the element is clicked first unless focus is already in it.\n" +
+      "Text is typed key by key, about 50 characters a second: a few thousand take a minute or more, and the call waits for it.",
     {
       ...TARGET,
       snapshotId: SNAPSHOT_ID,
@@ -818,7 +964,7 @@ export function registerThinBrowserTools(
       snapshotId: SNAPSHOT_ID,
       keys: z
         .array(
-          z.object({
+          strictArgs("each entry of keys", {
             key: z
               .string()
               .describe(
@@ -991,9 +1137,29 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_wait",
-    "Wait before looking again, for pages that are still settling. Clamped to 100–10000 ms.",
-    { durationMs: z.number().optional().describe("Milliseconds to wait; default 2000.") },
-    async ({ durationMs }) => reply(await browserWait(cdp, { durationMs })),
+    "Wait a set time (durationMs, 100–10000 ms), or until a text is on the page (forText) or gone " +
+      "from it (gone: true): every half second the screen and about 8000px around it are read, " +
+      "words, names and values alike, case and spacing aside. Fails when the time runs out " +
+      "(timeoutMs, default 5000, at most 30000).",
+    {
+      ...TARGET,
+      durationMs: z.number().optional().describe("Milliseconds to wait; default 2000. Not with forText."),
+      forText: z.string().min(1).optional().describe("Wait until this text is on the page."),
+      gone: z.boolean().optional().describe("With forText: wait until it is no longer on the page."),
+      timeoutMs: z.number().optional().describe("With forText: how long to wait for it."),
+    },
+    async ({ windowId, tabId, durationMs, forText, gone, timeoutMs }) => {
+      if (forText === undefined) {
+        if (gone !== undefined || timeoutMs !== undefined) {
+          return errorReply("gone and timeoutMs go with forText; for a set time give durationMs.");
+        }
+        return reply(await browserWait(cdp, { durationMs }));
+      }
+      if (durationMs !== undefined) return errorReply("durationMs is for a set time; with forText give timeoutMs.");
+      const target = await resolveTarget(cdp, windowId, tabId);
+      if (isTargetError(target)) return errorReply(target.error);
+      return reply(await waitForText(cdp, target, forText, gone === true, timeoutMs));
+    },
   );
 
   // ----------------------------------------------------------- Navigation
@@ -1215,44 +1381,119 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_batch",
-    "Run several page actions on one tab in a row, all aimed with the numbers of one " +
-      "snapshot, then get a fresh snapshot back — one call instead of one per step. Use it " +
-      "for steps that do not depend on each other's result: tick two filters, fill three " +
-      "fields that are already on screen. Do not put a step in that aims at something an " +
-      "earlier step makes appear (a suggestion list, a menu): its number does not exist yet. " +
-      "Stops at the first failure; after a step the browser says changed the page, the later steps " +
-      "that aim by number are skipped. Worth " +
-      "using for a single action too: the snapshot comes back in the same call.",
+    "Run several page actions on one tab in a row, then get a fresh snapshot back — one call " +
+      "instead of one per step; worth it for a single action too. Steps aim with the numbers of " +
+      "one snapshot. For something an earlier step makes appear (a suggestion list, a menu), " +
+      "wait for it with browser_wait forText, then aim with find instead of emsn: " +
+      '{"tool": "browser_click", "args": {"find": {"text": "Bluetooth headphones"}}}. ' +
+      "Stops at the first failure, unless the step says onFail: skip (a banner that may not " +
+      "show). After a step the browser says changed the page, the later steps that aim by number " +
+      "are not run; waits and finds still are.",
     {
       ...TARGET,
       snapshotId: SNAPSHOT_ID.optional().describe("From the snapshot the numbers were read from; required when any step names an emsn (a step may carry its own in args instead)."),
       actions: z
         .array(
-          z.object({
+          strictArgs("each step", {
             tool: z.enum(BATCHABLE, {
               errorMap: () => ({ message: `each step is {"tool": "browser_click", "args": {"emsn": 9}}; tool is one of ${BATCHABLE.join(", ")}` }),
             }),
-            args: z.record(z.string(), z.any()).optional().describe("That tool's own arguments, without windowId/tabId."),
+            args: z
+              .record(z.string(), z.any())
+              .optional()
+              .describe(
+                "That tool's own arguments, without windowId/tabId. In place of emsn, find " +
+                  "{text, tag?, nth?}: the element showing that text (words, name, value or hint; " +
+                  "the innermost, an exact match first) in a snapshot taken at that step, the " +
+                  "screen and about 8000px around it. Several " +
+                  "matching fail the step, listing them: add tag (BUTTON, A, INPUT...) or nth (from 1).",
+              ),
+            onFail: z
+              .enum(["stop", "skip"])
+              .optional()
+              .describe("stop (default): end the batch at this step's failure. skip: note it and go on. Invalid arguments stop it either way."),
           }),
         )
-        .min(1)
-        .max(10),
+        .min(1),
+      snapshot: z
+        .enum(["full", "changes", "none"])
+        .optional()
+        .describe(
+          "The snapshot after the steps. full (default): the whole of it. changes: only the lines " +
+            "new or changed (+) and gone (-) since snapshotId's snapshot, with the lines they sit " +
+            "in; the whole of it, saying why, when there is none to compare with (another page, " +
+            "no snapshotId) or the changes would be longer. none: no snapshot.",
+        ),
     },
-    async ({ windowId, tabId, snapshotId, actions }) => {
+    async ({ windowId, tabId, snapshotId, actions, snapshot }) => {
+      // Held now: the snapshots a long wait takes push it out of the kept ones.
+      const before = snapshotId ? renderedById.get(snapshotId) : undefined;
       const target = await resolveTarget(cdp, windowId, tabId);
       if (isTargetError(target)) return errorReply(target.error);
       const lines: string[] = [];
       let failed = false;
+      const once = "windowId and tabId are given once, for the whole batch";
+      // Where the page changed or navigated: steps after it that aim by number were planned on a
+      // page that is gone, so the batch stops at the first of them. Waits and finds still run.
+      let changed: { at: number; navigated: boolean } | undefined;
       for (const [i, step] of actions.entries()) {
+        if (changed && aimsWithNumbers(step.args)) {
+          lines.push(
+            changed.navigated
+              ? `Stopped at step ${i + 1}: step ${changed.at} navigated, so the numbers this step and the later ones use no longer apply.` +
+                  (snapshot === "none" ? " Take a snapshot for new ones." : " Read them off the snapshot below.")
+              : `Stopped at step ${i + 1}: step ${changed.at} changed the page, so this step and the later ones, aimed with numbers from before the change, were not run.`,
+          );
+          break;
+        }
         const run = handlers.get(step.tool)!;
-        // Held to the tool's own schema as a single call is: unknown fields stripped (the
-        // kernel refuses a name it does not take), types and ranges checked.
+        const skip = step.onFail === "skip";
+        /** Reports a failed step; true when the batch stops at it. */
+        const fails = (text: string): boolean => {
+          lines.push(`${i + 1}. ${step.tool} ${skip ? "FAILED, skipped" : "FAILED"}: ${text}`);
+          if (!skip) failed = true;
+          return !skip;
+        };
         let args: Record<string, unknown> = step.args ?? {};
-        const stepSnapshotId = typeof args.snapshotId === "string" && args.snapshotId.trim() ? args.snapshotId : snapshotId;
+        let stepSnapshotId = typeof args.snapshotId === "string" && args.snapshotId.trim() ? args.snapshotId : snapshotId;
         const shape = shapes.get(step.tool);
+        let found = "";
+        if (args.find !== undefined) {
+          const { find, ...rest } = args;
+          const f = FIND.safeParse(find);
+          const why = !shape?.emsn
+            ? `${step.tool} takes no element, so no find`
+            : ["emsn", "x", "y"].some((k) => rest[k] !== undefined)
+              ? "find is in place of emsn or x/y, not with them"
+              : f.success
+                ? ""
+                : f.error.issues.map((e) => `find${e.path.length ? `.${e.path.join(".")}` : ""}: ${e.message}`).join("; ");
+          if (why || !f.success) {
+            lines.push(`${i + 1}. ${step.tool} FAILED: invalid arguments (${why})`);
+            failed = true;
+            break;
+          }
+          const shot = await lookAt(cdp, target);
+          const hit = typeof shot === "string" ? { error: `no snapshot to find it in: ${shot}` } : findElement(shot.rendered, f.data);
+          if ("error" in hit) {
+            if (fails(hit.error)) break;
+            continue;
+          }
+          // Found by our rule in a snapshot the host never saw, so it is recorded as shown.
+          const seen = shot as TabSnapshot;
+          recordSnapshot(seen.tabId, seen.snapshotId, seen.emsnLines);
+          args = { ...rest, emsn: hit.emsn };
+          stepSnapshotId = seen.snapshotId;
+          found = ` (found emsn ${hit.emsn})`;
+        }
+        // Held to the tool's own schema as a single call is; the batch gives the window and tab.
         if (shape) {
           const { windowId: _w, tabId: _t, snapshotId: _s, ...own } = shape;
-          const parsed = z.object(own).safeParse(args);
+          const parsed = strictArgs(
+            step.tool,
+            { ...own, ...(_s ? { snapshotId: z.string().optional() } : {}) },
+            { windowId: once, tabId: once },
+          ).safeParse(args);
           if (!parsed.success) {
             const why = parsed.error.issues.map((e) => `${e.path.join(".") || "args"}: ${e.message}`).join("; ");
             lines.push(`${i + 1}. ${step.tool} FAILED: invalid arguments (${why})`);
@@ -1263,35 +1504,26 @@ export function registerThinBrowserTools(
         }
         const res = await run({ ...args, ...target, snapshotId: stepSnapshotId });
         const text = res.content.map((c) => c.text ?? "").join(" ");
-        lines.push(`${i + 1}. ${step.tool}${res.isError ? " FAILED" : ""}: ${text}`);
         if (res.isError) {
-          failed = true;
-          break;
+          if (fails(`${text}${found}`)) break;
+          continue;
         }
-        // Past a change the browser reports or a navigation, the remaining steps were planned on
-        // a page that is gone. Steps that use no numbers (a wait, a scroll to the top) still run.
-        const rest = actions.slice(i + 1).filter((s) => aimsWithNumbers(s.args));
-        const aiming = rest.length > 0;
-        // A run of middle clicks goes on: each opens a link elsewhere and leaves this page alone
-        // (the change reported is the link scrolled into view); a stray one costs a background tab.
-        const onlyOpeningLinks = isMiddleClick(step) && rest.every(isMiddleClick);
-        if (aiming && !onlyOpeningLinks && /page has changed/i.test(text)) {
-          lines.push(`Stopped after step ${i + 1}: the page changed, so the remaining steps, which aim with this snapshot's numbers, were not run.`);
-          break;
-        }
-        if (aiming && NAVIGATING.has(step.tool)) {
-          lines.push(`Stopped after step ${i + 1}: the page navigated, so the numbers the remaining steps use no longer apply. Read them off the snapshot below.`);
-          break;
+        lines.push(`${i + 1}. ${step.tool}${found}: ${text}`);
+        if (NAVIGATING.has(step.tool)) {
+          changed = { at: i + 1, navigated: true };
+        } else if (!changed && /page has changed/i.test(text)) {
+          // A run of middle clicks goes on: each opens a link elsewhere and leaves this page alone
+          // (the change reported is the link scrolled into view); a stray one costs a background tab.
+          const aiming = actions.slice(i + 1).filter((s) => aimsWithNumbers(s.args));
+          if (!(isMiddleClick(step) && aiming.every(isMiddleClick))) changed = { at: i + 1, navigated: false };
         }
       }
+      const done = { type: "text" as const, text: lines.join("\n") };
+      if (snapshot === "none") return { isError: failed, content: [done] };
       const shot = await handlers.get("browser_take_snapshot")!({ ...target });
-      return {
-        isError: failed,
-        content: [
-          { type: "text" as const, text: lines.join("\n") },
-          ...shot.content.map((c) => ({ type: "text" as const, text: c.text ?? "" })),
-        ],
-      };
+      const texts = shot.content.map((c) => c.text ?? "");
+      if (snapshot === "changes" && !shot.isError) texts[0] = changesOnly(texts[0], snapshotId, before);
+      return { isError: failed, content: [done, ...texts.map((text) => ({ type: "text" as const, text }))] };
     },
   );
 

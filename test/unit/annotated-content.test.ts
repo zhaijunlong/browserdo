@@ -15,6 +15,7 @@ import {
   collectEmsn,
   renderPagePosition,
   renderAnnotatedContent,
+  renderWithLinks,
   footnoteList,
   sameLine,
 } from "../../src/annotated_content.js";
@@ -956,7 +957,7 @@ test("integer emsn, 0 included, renders and is collected", () => {
 });
 
 // An address sits on the entries inside a link, once per link.
-test("links: a line marks the addresses of what it folds in; an address keeps a word out of a merge", () => {
+test("links: a line marks the addresses of what it folds in; a word with one is marked where it is", () => {
   const tree = node(undefined, [
     node({ emsn: 3, node_name: "DIV", label: "result" }, [
       node({ node_name: "SPAN", href: "https://a.example/x", text_runs: [text("Title")] }),
@@ -967,7 +968,7 @@ test("links: a line marks the addresses of what it folds in; an address keeps a 
   ]);
   assert.equal(
     renderAnnotatedContent(tree, { links: true }),
-    '3 DIV [result] "Title snippet" [^1]\n· "see"\n· "here" [^2]\n\n[^1]: https://a.example/x\n[^2]: https://b.example/',
+    '3 DIV [result] "Title snippet" [^1]\n· "see here[^2]"\n\n[^1]: https://a.example/x\n[^2]: https://b.example/',
   );
   assert.doesNotMatch(renderAnnotatedContent(tree), /\[\^/, "addresses only when asked");
 });
@@ -1116,4 +1117,118 @@ test("page position: a chain link missing its figures is at its end; one without
     children: [],
   });
   assert.match(pos, /moves an unnumbered pane DIV \(at its end\), then the page \(at its end\)\./);
+});
+// ---- words in a line: spacing, and links in a sentence ----
+
+/** A run of text at x on line y (20 high), 16 per character. */
+const run = (s: string, x: number, y = 0) => ({ text: s, bbox: [x, y, s.length * 16, 20] });
+
+test("cells whose boxes touch are separate words; one word split over two spans is not", () => {
+  // A cell's box includes its padding: the boxes touch, the words do not.
+  const td = (s: string, x: number) => node({ node_name: "TD", bbox: [x, 0, 100, 30], text_runs: [run(s, x + 8, 5)] });
+  const span = (s: string, x: number) => node({ node_name: "SPAN", bbox: [x, 100, s.length * 16, 20], text_runs: [run(s, x, 100)] });
+  const out = renderAnnotatedContent(node(undefined, [td("Name", 0), td("Qty", 100), span("Hel", 0), span("lo", 48)]));
+  assert.equal(out, '· "Name Qty"\n· "Hello"');
+});
+
+test("a text wrapped onto the next line: no space where Chinese meets the break, a space in English", () => {
+  const p = (runs: unknown[]) => node(undefined, [node({ node_name: "P", bbox: [0, 0, 600, 44], text_runs: runs })]);
+  assert.equal(renderAnnotatedContent(p([run("后台干", 500), run("活不摸鱼", 0, 24)])), '· "后台干活不摸鱼"');
+  assert.equal(renderAnnotatedContent(p([run("Claude in", 450), run("Chrome", 0, 24)])), '· "Claude in Chrome"');
+  // Two texts stacked (a title over a price) are not one text wrapped.
+  const card = node(undefined, [
+    node({ emsn: 1, node_name: "A", bbox: [0, 0, 200, 44] }, [
+      node({ node_name: "SPAN", bbox: [0, 0, 64, 20], text_runs: [run("商品名称", 0)] }),
+      node({ node_name: "SPAN", bbox: [0, 24, 48, 20], text_runs: [run("￥99", 0, 24)] }),
+    ]),
+  ]);
+  assert.equal(renderAnnotatedContent(card), '1 A "商品名称 ￥99"');
+});
+
+/** 前两天我写过一篇<a 30>文章</a>可见一斑, the paragraph numbered or not. */
+const sentence = (pEmsn?: number) =>
+  node(undefined, [
+    node({ ...(pEmsn ? { emsn: pEmsn } : {}), node_name: "P", bbox: [0, 0, 600, 20], text_runs: [run("前两天我写过一篇", 0)] }, [
+      node({ emsn: 30, node_name: "A", href: "https://a.example/", bbox: [128, 0, 32, 20], text_runs: [run("文章", 128)] }),
+      node({ node_name: "#text", bbox: [160, 0, 64, 20], text_runs: [run("可见一斑", 160)] }),
+    ]),
+  ]);
+
+test("a link in a sentence stays in its place, numbered as Markdown writes a link; reading gives its address there", () => {
+  assert.equal(renderAnnotatedContent(sentence()), '· "前两天我写过一篇[文章](#30)可见一斑"');
+  assert.equal(renderAnnotatedContent(sentence(29)), '29 P "前两天我写过一篇[文章](#30)可见一斑"');
+  assert.equal(
+    renderAnnotatedContent(sentence(), { numbers: false, links: true }),
+    '"前两天我写过一篇文章[^1]可见一斑"\n\n[^1]: https://a.example/',
+  );
+  assert.deepEqual([...collectEmsn(sentence(29))].sort(), ["29", "30"]);
+  // Read without numbers, a line's leading digits are the page's, not a number to act on.
+  const year = node(undefined, [node({ node_name: "P", text_runs: [text("2026 was a year")] })]);
+  assert.equal(renderWithLinks(year, { numbers: false }).numbers.size, 0);
+});
+
+test("a sentence wrapped over two lines is one line, with a link broken across the wrap", () => {
+  const tree = node(undefined, [
+    node({ node_name: "P", bbox: [0, 0, 240, 44], text_runs: [run("see the ", 0)] }, [
+      node({ emsn: 7, node_name: "A", bbox: [0, 0, 240, 44], text_runs: [run("annual", 128), run("report", 0, 24)] }),
+      node({ node_name: "#text", bbox: [96, 24, 80, 20], text_runs: [run(" now.", 96, 24)] }),
+    ]),
+  ]);
+  assert.equal(renderAnnotatedContent(tree), '· "see the [annual report](#7) now."');
+});
+
+test("a link inside a link is not a word in its sentence: each keeps its number at a line's start", () => {
+  const tree = node(undefined, [
+    node({ emsn: 1, node_name: "A", bbox: [0, 0, 200, 20], text_runs: [run("Read ", 0)] }, [
+      node({ emsn: 2, node_name: "A", bbox: [80, 0, 64, 20], text_runs: [run("more", 80)] }),
+    ]),
+  ]);
+  const out = renderAnnotatedContent(tree);
+  assert.doesNotMatch(out, /\]\(#/);
+  assert.match(out, /^1 A "Read"\n\t2 A "more"$/);
+});
+
+test("links in a sentence: the same words twice, at its start and its end, an icon after the words", () => {
+  // Laid out left to right; the last link has an icon after its words, as Zhihu draws one.
+  let x = 0;
+  const a = (emsn: number, s: string, withIcon = false) => {
+    const at = x;
+    x += s.length * 16 + (withIcon ? 12 : 0);
+    const icon = node({ node_name: "svg", bbox: [at + s.length * 16, 4, 12, 12] });
+    return node({ emsn, node_name: "A", bbox: [at, 0, x - at, 20], text_runs: [run(s, at)] }, withIcon ? [icon] : []);
+  };
+  const t = (s: string) => {
+    const at = x;
+    x += s.length * 16;
+    return node({ node_name: "#text", bbox: [at, 0, s.length * 16, 20], text_runs: [run(s, at)] });
+  };
+  const kids = [a(1, "下载"), t("Windows 版，或者"), a(2, "下载"), t("Mac 版，见"), a(3, "官网", true), t("。")];
+  const out = renderAnnotatedContent(node(undefined, [node({ node_name: "P", bbox: [0, 0, 800, 20] }, kids)]));
+  assert.equal(out, '· "[下载](#1)Windows 版，或者[下载](#2)Mac 版，见[官网](#3)。"');
+});
+
+test("links that stand alone keep a line each: a menu, or a link far from the words beside it", () => {
+  const a = (emsn: number, s: string, x: number) => node({ emsn, node_name: "A", bbox: [x, 0, 64, 20], text_runs: [run(s, x)] });
+  const out = renderAnnotatedContent(node(undefined, [node({ node_name: "DIV", bbox: [0, 0, 600, 20] }, [a(1, "Home", 0), a(2, "News", 200), a(3, "Help", 400)])]));
+  assert.equal(out, '1 A "Home"\n2 A "News"\n3 A "Help"');
+});
+
+test("a name that says more than a link's words keeps it on its own line; one that repeats them does not", () => {
+  const p = (label: string) =>
+    node(undefined, [
+      node({ node_name: "P", bbox: [0, 0, 600, 20], text_runs: [run("see ", 0)] }, [
+        node({ emsn: 5, node_name: "A", label, bbox: [64, 0, 64, 20], text_runs: [run("here", 64)] }),
+      ]),
+    ]);
+  assert.equal(renderAnnotatedContent(p("Here (web page)")), '· "see [here](#5)"');
+  assert.equal(renderAnnotatedContent(p("Download the 2026 report")), '· "see"\n5 A [Download the 2026 report] "here"');
+});
+
+test("page text that reads like a link or an address is escaped, and passes no number to the gate", () => {
+  const tree = node(undefined, [
+    node({ emsn: 1, node_name: "P", text_runs: [text("见[附录](#12)，又见]\\(#3)，注[^4]")] }),
+    node({ emsn: 2, node_name: "BUTTON", label: "x](#9)", text_runs: [text("Go")] }),
+  ]);
+  assert.equal(renderAnnotatedContent(tree), '1 P "见[附录]\\(#12)，又见]\\\\(#3)，注[\\^4]"\n2 BUTTON [x]\\(#9)] "Go"');
+  assert.deepEqual([...collectEmsn(tree)].sort(), ["1", "2"]);
 });

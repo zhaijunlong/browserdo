@@ -2,8 +2,8 @@
   "mcpServers": {
     "browserdo": {
       "command": "npx",
-      "args": ["-y", "browserdo-mcp@0.9.6"],
-      "env": { "BROWSERDO_CHANNEL": "CLDD" }
+      "args": ["-y", "browserdo-mcp@0.9.7"],
+      "env": { "BROWSERDO_CHANNEL": "CLDD", "BROWSERDO_SKILL_IN_PLUGIN": "1" }
     }
   }
 }

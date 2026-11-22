@@ -11,6 +11,7 @@
 //     <emsn> <TAG>[:type] [name] "text" ="value" formats ... hint "grey text" checked/unchecked disabled readonly/aria-readonly
 //     \t<emsn> <TAG>...        one Tab = inside the element on the line above
 //     · [name] "text"          no number: read-only
+//     · "read the [article](#12) here"   a link in a sentence keeps its place, numbered as Markdown writes a link
 //     <emsn> DIV scrollable: 537px more below   a pane that scrolls on its own
 //     ... offscreen / partly offscreen         long snapshot only: not (fully) in the image
 //     · "text in a closed DETAILS" collapsed   not on screen until the DETAILS is opened
@@ -67,6 +68,8 @@ export interface RawNode {
   emsn?: unknown;
   /** The DOM nodeName: an upper-case tag name, or `#text`. Without this field it is not a page element. */
   node_name?: unknown;
+  /** The ARIA role, as the kernel works it out ("link", "paragraph"). */
+  role?: unknown;
   /** The accessible name. When present it says something the entry's own text does not. */
   label?: unknown;
   /** INPUT only: `text` / `password` / `radio` / `checkbox` and so on. */
@@ -326,17 +329,30 @@ export function sameLine(a: Box, b: Box): boolean {
   return t.h <= s.h * 3 && s.y >= t.y && s.y + s.h <= t.y + t.h && xGap <= s.h && -xGap < s.w / 2;
 }
 
-/** A piece of text, with whether white space trimmed off its ends was there. */
-type Piece = { text: string; box?: Box; lead?: boolean; trail?: boolean };
+/**
+ * A piece of text, with whether white space trimmed off its ends was there. start and end: its
+ * first and last line of text, when box is its element's (padding included). follows: the run
+ * of the same text this one carries on from, on the next line.
+ */
+type Piece = { text: string; box?: Box; start?: Box; end?: Box; lead?: boolean; trail?: boolean; follows?: Piece };
 
 function pieceOf(t: RawTextRun): Piece {
   const raw = String(rawTextOf(t) ?? "");
   return { text: textOf(t), box: readBbox(t?.bbox), lead: /^\s/.test(raw), trail: /\s$/.test(raw) };
 }
 
-/** A node's own text runs, in reading order, joined. */
-function joinRuns(runs: readonly RawTextRun[]): string {
-  return joinPieces(readingOrder(runs, (t) => t.bbox).map(pieceOf));
+/** One node's runs as pieces in reading order, each line of a wrapped text following the one before. */
+function piecesOf(runs: readonly RawTextRun[]): Piece[] {
+  const pieces = readingOrder(runs, (t) => t.bbox).map(pieceOf);
+  pieces.forEach((p, i) => (p.follows = pieces[i - 1]));
+  return pieces;
+}
+
+const boxArray = (p: Piece): unknown => p.box && [p.box.x, p.box.y, p.box.w, p.box.h];
+
+/** Pieces from several nodes, in reading order, joined. */
+function joinMixed(pieces: readonly Piece[]): string {
+  return joinPieces(readingOrder(pieces, boxArray));
 }
 
 const squash = (s: string): string => s.replace(/\s+/g, " ").trim();
@@ -366,8 +382,11 @@ function unseenText(n: RawNode): string {
  * Join pieces already in reading order.
  *
  * Pieces touching on one line join with no space, so a word with a span per character (and CJK)
- * does not read "T h i s"; white space the page had between them is kept. A piece painted again
- * over a kept one is dropped; the same text elsewhere is content ("hello" has two l's).
+ * does not read "T h i s"; white space the page had between them is kept. Touching is measured
+ * between the text, not the elements: two table cells' boxes touch, their words do not. A text
+ * wrapped onto the next line gets a space, as English breaks at one, unless Chinese or Japanese
+ * meets at the break (a Chinese word broken by the line read with a space in it). A piece
+ * painted again over a kept one is dropped; the same text elsewhere is content ("hello" has two l's).
  */
 function joinPieces(pieces: readonly Piece[]): string {
   const kept: Piece[] = [];
@@ -376,12 +395,78 @@ function joinPieces(pieces: readonly Piece[]): string {
     if (!p.text) continue;
     if (kept.some((k) => k.text === p.text && (!k.box || !p.box || overlapShare(k.box, p.box) > 0.5))) continue;
     const prev = kept.at(-1);
-    const joins = prev && !prev.trail && !p.lead && prev.box && p.box && touching(prev.box, p.box);
+    const a = prev?.end ?? prev?.box;
+    const b = p.start ?? p.box;
+    const joins =
+      prev && !prev.trail && !p.lead && a && b &&
+      (touching(a, b) || (p.follows === prev && !sameLine(a, b) && (CJK_END.test(prev.text.replace(MARKS_END, "")) || CJK_START.test(p.text.replace(MARKS_START, "")))));
     out += prev && !joins ? ` ${p.text}` : p.text;
     kept.push(p);
   }
   return out;
 }
+
+/** Elements laid out in a line of text rather than as a block of their own. */
+const INLINE = new Set([
+  "#text", "A", "ABBR", "B", "BDI", "BDO", "CITE", "CODE", "DATA", "DEL", "DFN", "EM", "FONT", "I", "INS",
+  "KBD", "MARK", "Q", "S", "SAMP", "SMALL", "SPAN", "STRONG", "SUB", "SUP", "TIME", "U", "VAR",
+]);
+
+/** Nothing to read or act on: no number, name, text or state, here or below. */
+function silent(n: RawNode): boolean {
+  if (usable(n.emsn) || isControl(n) || (n.label !== undefined && String(n.label).trim())) return false;
+  if (shownRuns(n.text_runs).some((t) => textOf(t)) || unseenText(n)) return false;
+  return childrenOf(n).every(silent);
+}
+
+/** The box of the first line of text in n, in reading order. */
+function firstRunBox(n: RawNode): unknown {
+  const own = readingOrder(shownRuns(n.text_runs).filter((t) => textOf(t) && readBbox(t.bbox)), (t) => t.bbox);
+  if (own.length) return own[0].bbox;
+  for (const c of childrenOf(n)) {
+    const b = firstRunBox(c);
+    if (b) return b;
+  }
+  return undefined;
+}
+
+function isLink(n: RawNode): boolean {
+  return n.node_name === "A" || n.role === "link";
+}
+
+/** b starts on a's line, at most a wide space after it (a space is about 20% of the height). */
+function near(a: Box, b: Box): boolean {
+  if (!sameLine(a, b)) return false;
+  const gap = b.x - (a.x + a.w);
+  const h = Math.min(a.h, b.h);
+  return gap > -0.5 * h && gap < 0.6 * h;
+}
+
+// Held in the text until the line is done: an address (NOTE) and the end of a link in a sentence
+// (LINK, the "](#12)" after its words). Control characters, so no page text can be taken for them.
+const NOTE_OPEN = "\u0001";
+const NOTE_CLOSE = "\u0002";
+const NOTE = /\u0001([^\u0002]*)\u0002/g;
+const LINK_OPEN = "\u0003";
+const LINK_CLOSE = "\u0004";
+const LINK = /\u0003(\d+)\u0004/g;
+// What a link in a sentence adds around its words.
+const MARKS_START = /^\[/;
+const MARKS_END = /(\u0003\d+\u0004|\u0001[^\u0002]*\u0002)+$/;
+
+/**
+ * Page text that would read as our marks gets a backslash, as Markdown escapes: "](#12" as
+ * "]\(#12", "[^3" as "[\^3", and one more where the page already has backslashes there. So only
+ * an unescaped "[words](#12)" is a link and only "[^3]" an address.
+ */
+function escapeMarks(s: string): string {
+  return s.replace(/\](\\*)\(#(?=\d)/g, "]$1\\(#").replace(/\[(\\*)\^(?=\d)/g, "[$1\\^");
+}
+
+// Han, kana and their punctuation; not Hangul, which spaces its words.
+const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef";
+const CJK_END = new RegExp(`[${CJK}]$`, "u");
+const CJK_START = new RegExp(`^[${CJK}]`, "u");
 
 /** On one line with a gap under 12% of its height; a space between words is about 20%. */
 function touching(a: Box, b: Box): boolean {
@@ -402,10 +487,10 @@ function overlapShare(a: Box, b: Box): number {
  * Whether an emsn value is usable. **Digits only** — the pdl declares an integer emsn and all
  * 48402 in the corpus are plain digits.
  *
- * Tightening to digits closes a loophole by construction: collectEmsn scrapes the line start
- * with `/^\t*(\d+) /`, so an "a3" would render as `a3 SPAN "x"` — visible to the model, used by
- * it, never collected, and then refused by the executor. Visible but unusable is the hardest
- * failure to diagnose.
+ * Tightening to digits closes a loophole by construction: the renderer records a number by its
+ * digits (see renderWithLinks), so an "a3" would render as `a3 SPAN "x"` — visible to the model,
+ * used by it, never collected, and then refused by the executor. Visible but unusable is the
+ * hardest failure to diagnose.
  */
 function usable(v: unknown): string | undefined {
   if (v === undefined || v === null) return undefined;
@@ -418,7 +503,7 @@ function usable(v: unknown): string | undefined {
  * name or title rather than the painted fragment (which may also break mid-word).
  */
 function textOf(t: RawTextRun): string {
-  return squash(String(rawTextOf(t) ?? ""));
+  return escapeMarks(squash(String(rawTextOf(t) ?? "")));
 }
 
 function rawTextOf(t: RawTextRun): unknown {
@@ -455,14 +540,10 @@ export function collectEmsnLines(raw: unknown): Map<string, string> {
   // line happened to start with "123 " the result would be a single-element set, and **every
   // real number would then be refused by the executor**. An empty set makes that gate skip
   // itself (it checks allowed.size), so the broken round can at least still move.
-  if (!parseTree(raw)) return new Map();
-
-  const out = new Map<string, string>();
-  for (const line of renderAnnotatedContent(raw).split("\n")) {
-    const m = /^\t*(\d+) /.exec(line);
-    if (m && !out.has(m[1])) out.set(m[1], line.replace(/^\t+/, ""));
-  }
-  return out;
+  //
+  // The renderer hands over the numbers it wrote rather than having them read back out of the
+  // text, where page text could pass for one (a line starting "123 ", a "(#12)" in a sentence).
+  return renderWithLinks(raw).numbers;
 }
 
 /** Parse into a tree; undefined when it will not parse. The renderer and collectEmsn share this one test. */
@@ -500,7 +581,7 @@ function isControl(n: RawNode): boolean {
 function describe(n: RawNode, text: string, reading = false): string {
   const parts: string[] = [];
   if (n.label !== undefined && String(n.label).trim()) {
-    parts.push(`[${String(n.label)}]`);
+    parts.push(`[${escapeMarks(String(n.label))}]`);
   }
   if (text) parts.push(`"${text}"`);
   // JSON-quoted: an editable area's line breaks would split the line, and
@@ -514,7 +595,7 @@ function describe(n: RawNode, text: string, reading = false): string {
     if (formats) parts.push(`formats ${formats}`);
   }
   if (n.placeholder !== undefined && String(n.placeholder).trim()) {
-    parts.push(`hint "${String(n.placeholder)}"`);
+    parts.push(`hint "${escapeMarks(String(n.placeholder))}"`);
   }
   if (n.checked !== undefined) parts.push(n.checked ? "checked" : "unchecked");
   if (n.disabled) parts.push("disabled");
@@ -771,30 +852,82 @@ export function footnotesIn(text: string): number[] {
  * Render with links as footnotes: `links[n - 1]` is footnote n. Marks rather than inline
  * addresses keep a big menu from pushing the text back, give one address one number however
  * often it appears, and let a caller paging through list only its part's addresses. `[^n]`,
- * because page text often contains `[n]`.
+ * because page text often contains `[n]`. `numbers`: each number the text shows, with its line.
  */
 export function renderWithLinks(
   raw: unknown,
   { numbers = true, links = false }: { numbers?: boolean; links?: boolean } = {},
-): { text: string; links: string[] } {
+): { text: string; links: string[]; numbers: Map<string, string> } {
   const parsed = parseTree(raw);
-  if (!parsed) return { text: typeof raw === "string" ? raw : "", links: [] };
+  if (!parsed) return { text: typeof raw === "string" ? raw : "", links: [], numbers: new Map() };
 
   const lines: string[] = [];
   const addresses: string[] = [];
   const footnote = new Map<string, number>();
-  const linkSuffix = (hs: string[]): string => {
-    if (!links) return "";
-    return hs
-      .map((h) => {
-        if (!footnote.has(h)) footnote.set(h, addresses.push(h));
-        return ` [^${footnote.get(h)}]`;
-      })
-      .join("");
-  };
+  // An address's mark is held as NOTE_OPEN address NOTE_CLOSE until the end, so the footnotes
+  // are numbered in the order the text shows them, not the order they were found.
+  const noteOf = (h: string): string => `${NOTE_OPEN}${h}${NOTE_CLOSE}`;
+  const linkSuffix = (hs: string[]): string => (links ? hs.map((h) => ` ${noteOf(h)}`).join("") : "");
   const chain = chainRooms(parsed as RawRoot);
   // A container's effective position has to be computed by walking its descendants; cache it so the same subtree is not unioned over and over.
   const boxCache = new Map<RawNode, unknown>();
+  const indent = (d: number) => "\t".repeat(Math.min(d, MAX_INDENT));
+  /** Nodes whose text went into a line around them, so they get no line of their own. */
+  const folded = new Set<RawNode>();
+
+  /**
+   * The pieces of an element that flows in a line of text: inline (a span, bold, a link), with
+   * text and nothing else to say. A numbered one must be a link; its words are marked with its
+   * number as Markdown writes a link (`[words](#30)`), and its address (`[^3]`) after them.
+   */
+  const inlinePieces = (n: RawNode, inLink = false): Piece[] | undefined => {
+    if (!INLINE.has(String(n.node_name)) || isControl(n) || n.disabled || unseenText(n) || n.modal || n.unread) return undefined;
+    const emsn = usable(n.emsn);
+    const link = isLink(n);
+    if (emsn && (!link || inLink)) return undefined;
+    const pieces = piecesOf(shownRuns(n.text_runs));
+    // A run without a position stands where its element does.
+    for (const p of pieces) p.box ??= effectiveBoxOf(n, boxCache);
+    let icon = false;
+    for (const c of childrenOf(n)) {
+      if (silent(c)) {
+        icon = true; // beside the words
+        continue;
+      }
+      const more = inlinePieces(c, inLink || link || !!hrefOf(n));
+      if (!more) return undefined;
+      pieces.push(...more);
+    }
+    if (!pieces.length) return undefined;
+    const sorted = readingOrder(pieces, boxArray);
+    // An icon after the words fills the gap to what follows, which still joins them with no space.
+    const [lastBox, whole] = [sorted[sorted.length - 1].box, effectiveBoxOf(n, boxCache)];
+    if (icon && lastBox && whole && sameLine(lastBox, whole)) {
+      sorted[sorted.length - 1].end = { ...lastBox, w: Math.max(lastBox.w, whole.x + whole.w - lastBox.x) };
+    }
+    // A name that says more than the words keeps a line of its own; one that only repeats them
+    // ("http://realtor.com" on "realtor.com", a title "Safari (web browser)") need not.
+    const label = n.label !== undefined ? squash(String(n.label)).toLowerCase() : "";
+    if (label && !label.includes(joinPieces(sorted).toLowerCase())) return undefined;
+    const [first, last] = [sorted[0], sorted[sorted.length - 1]];
+    if (emsn && numbers) {
+      first.text = `[${first.text}`;
+      last.text += `${LINK_OPEN}${emsn}${LINK_CLOSE}`;
+    }
+    const href = hrefOf(n);
+    if (href && links && !inLink) last.text += noteOf(href);
+    return sorted;
+  };
+
+  /** Whether a link's text sits right beside some of the other text, as a word in a sentence does. */
+  const besideText = (link: Piece[], text: readonly Piece[]): boolean => {
+    const start = link[0].start ?? link[0].box;
+    const end = link[link.length - 1].end ?? link[link.length - 1].box;
+    return text.some((t) => {
+      const [a, b] = [t.end ?? t.box, t.start ?? t.box];
+      return (!!a && !!start && near(a, start)) || (!!end && !!b && near(end, b));
+    });
+  };
 
   /**
    * insideEmsn: an ancestor above already carries an emsn and will absorb our unnumbered text
@@ -802,7 +935,7 @@ export function renderWithLinks(
    * a line of its own.
    */
   const walk = (node: RawNode, depth: number, insideEmsn: boolean): void => {
-    if (!node || typeof node !== "object") return;
+    if (!node || typeof node !== "object" || folded.has(node)) return;
     if (node.node_name === undefined) {
       // The root, regions and plain wrappers all lack node_name, but their children still need
       // sorting — missing this leaves the top level of the whole tree in arrival order.
@@ -811,11 +944,10 @@ export function renderWithLinks(
       // testing field presence treats it as an element. A well-formed region has only a bbox
       // and renders the same either way; but the moment it carries something like a label, an
       // entry appears out of nowhere.
-      walkChildren(kids(node, boxCache), depth, insideEmsn);
+      walkChildren(kids(node, boxCache).map((n) => ({ node: n })), depth, insideEmsn);
       return;
     }
 
-    const indent = (d: number) => "\t".repeat(Math.min(d, MAX_INDENT));
     // A control appends its type to the tag (INPUT:password): the only way the model can tell a
     // password box from an ordinary text box.
     const tag =
@@ -827,7 +959,7 @@ export function renderWithLinks(
     // All text runs fold into this node's line. **Sort before joining**: a run's arrival order
     // is not its screen order, and joining in array order produces scrambled sentences (85
     // confirmed cases in the old corpus).
-    const plainRuns = readingOrder(textRuns, (t) => t.bbox);
+    const own = piecesOf(textRuns);
 
     let childDepth = depth;
     // A scroller keeps only its own text. Since late September 2026 every scroller is numbered, and folding
@@ -837,25 +969,35 @@ export function renderWithLinks(
     if (nodeEmsn) {
       // Collect positions along with the runs and sort everything into reading order at the
       // end — text runs from different descendants need sorting too.
-      const runs: RawTextRun[] = [...plainRuns];
-      const own = hrefOf(node);
-      const hrefs = new Set<string>(own ? [own] : []);
+      const pieces: Piece[] = [...own];
+      const ownHref = hrefOf(node);
+      const hrefs = new Set<string>(ownHref ? [ownHref] : []);
+      const inSentence: Array<{ node: RawNode; pieces: Piece[] }> = [];
       // Fold in the text of every unnumbered descendant as well; a numbered descendant emits
-      // its own line, so skip its whole subtree.
+      // its own line, so skip its whole subtree, unless it is a link in a sentence here.
       const collect = (n: RawNode): void => {
         for (const child of childrenOf(n)) {
-          if (usable(child.emsn)) continue; // it emits its own line; skip the whole subtree
-          for (const t of shownRuns(child.text_runs)) {
-            if (textOf(t)) runs.push(t);
+          if (usable(child.emsn)) {
+            // A link inside a link is not a word in its sentence.
+            const p = isLink(node) ? undefined : inlinePieces(child);
+            if (p) inSentence.push({ node: child, pieces: p });
+            continue;
           }
+          pieces.push(...piecesOf(shownRuns(child.text_runs)));
           const h = hrefOf(child);
           if (h) hrefs.add(h);
           collect(child);
         }
       };
       if (!scroller) collect(node);
+      const words = [...pieces];
+      for (const l of inSentence) {
+        if (!besideText(l.pieces, words)) continue;
+        pieces.push(...l.pieces);
+        folded.add(l.node);
+      }
 
-      const joined = joinRuns(runs);
+      const joined = joinMixed(pieces);
       let rest = describe(node, joined, !numbers);
       rest += linkSuffix([...hrefs]);
       const room = scroller && numbers ? roomOf(node, chain) : undefined;
@@ -868,6 +1010,18 @@ export function renderWithLinks(
         lines.push(`${indent(depth)}${tag === "#text" ? rest.trimStart() : `${tag}${rest}`}`);
       }
       childDepth = depth + 1;
+    } else if (!insideEmsn && own.length && !describe(node, "", true) && !(links && hrefOf(node)) &&
+      !isControl(node) && node.modal !== true && node.unread !== true) {
+      // Plain text with its inline children (a paragraph and its links, bold words): the runs
+      // and the children flow together, so one sentence is one line, not a line per piece.
+      const entries: Entry[] = [...own.map((p) => ({ pieces: [p], shown: node.shown })), ...childrenOf(node).map((n) => ({ node: n }))];
+      // By where each one's text starts: a text wrapped over two lines has a box as wide as the
+      // paragraph, which would put it first.
+      const startOf = (e: Entry): unknown =>
+        e.pieces ? boxArray(e.pieces[0]) : (firstRunBox(e.node!) ?? effectiveBox(e.node!, boxCache));
+      walkChildren(readingOrder(entries, startOf), depth, false);
+      walkUnseen(node, depth);
+      return;
     } else {
       // No number of its own: emit whatever the ancestor's line could not absorb, read-only.
       //
@@ -878,12 +1032,10 @@ export function renderWithLinks(
       // Name, value, hint, checked and disabled go out either way: the roll-up only takes
       // text_runs. A `<label emsn=10><input placeholder="phone">` leaked exactly this way,
       // rendering as a bare `10 LABEL` with the input absent from the prompt.
-      const s = insideEmsn
-        ? ""
-        : joinPieces(plainRuns.map(pieceOf));
+      const s = insideEmsn ? "" : joinPieces(own);
       // With a numbered ancestor, that ancestor's line already carries this address.
-      const own = insideEmsn ? undefined : hrefOf(node);
-      const link = linkSuffix(own ? [own] : []);
+      const ownHref = insideEmsn ? undefined : hrefOf(node);
+      const link = linkSuffix(ownHref ? [ownHref] : []);
       const rest = describe(node, s, !numbers) + link;
       // A dialog's or an unread frame's tag too: "· modal" or "· not loaded yet" alone says
       // nothing about what is meant.
@@ -896,11 +1048,14 @@ export function renderWithLinks(
 
     // Children are walked in reading order: arrival order is document order, and a grid's
     // reading order is not its document order (the A B C D / C D A B case in readingOrder).
-    walkChildren(kids(node, boxCache), childDepth, !scroller && (insideEmsn || !!nodeEmsn));
+    walkChildren(kids(node, boxCache).map((n) => ({ node: n })), childDepth, !scroller && (insideEmsn || !!nodeEmsn));
+    walkUnseen(node, childDepth);
+  };
 
-    // After the children, so a closed DETAILS reads its SUMMARY first.
+  /** After the children, so a closed DETAILS reads its SUMMARY first. */
+  const walkUnseen = (node: RawNode, depth: number): void => {
     const hidden = unseenText(node);
-    if (hidden) lines.push(`${indent(childDepth)}${numbers ? `· "${hidden}" collapsed` : hidden}`);
+    if (hidden) lines.push(`${indent(depth)}${numbers ? `· "${hidden}" collapsed` : hidden}`);
   };
 
   /** A node that is only text (no number, children, label or state): a word in a span. */
@@ -909,29 +1064,56 @@ export function renderWithLinks(
     if (childrenOf(n).length > 0 || isControl(n) || n.disabled || (links && hrefOf(n))) return undefined;
     if (n.label !== undefined && String(n.label).trim()) return undefined;
     if (unseenText(n) || actingMarks(n).length) return undefined;
-    const runs = readingOrder(shownRuns(n.text_runs), (t) => t.bbox);
-    const text = joinPieces(runs.map(pieceOf));
+    const pieces = piecesOf(shownRuns(n.text_runs));
+    const text = joinPieces(pieces);
     if (!text) return undefined;
     const box = effectiveBoxOf(n, boxCache);
-    return { text, box, lead: pieceOf(runs[0]).lead, trail: pieceOf(runs[runs.length - 1]).trail };
+    const [first, last] = [pieces[0], pieces[pieces.length - 1]];
+    return { text, box, start: first.box, end: last.box, lead: first.lead, trail: last.trail };
   };
 
-  /** Siblings in reading order; a run of bare text on one screen line is one line, not a word per line. */
-  function walkChildren(children: RawNode[], depth: number, insideEmsn: boolean): void {
-    for (let i = 0; i < children.length; ) {
-      const group: Array<{ node: RawNode; piece: Piece & { box: Box } }> = [];
-      for (let j = i; !insideEmsn && j < children.length; j++) {
-        const piece = barePiece(children[j]);
+  /** What a line of flowing text is made of: a node's own runs, or a node that may flow with them. */
+  type Entry = { node?: RawNode; pieces?: Piece[]; shown?: unknown };
+
+  /**
+   * Entries in reading order; a run of text on one screen line is one line, not a word per line.
+   * Inline pieces (spans, bold, a link in a sentence) also carry on over a line break, so a
+   * wrapped paragraph stays one line.
+   */
+  function walkChildren(entries: Entry[], depth: number, insideEmsn: boolean): void {
+    type Flow = { entry: Entry; pieces: Piece[]; inline: boolean; link?: RawNode };
+    const flowOf = (e: Entry): Flow | undefined => {
+      if (e.pieces) return { entry: e, pieces: e.pieces, inline: true };
+      const n = e.node!;
+      if (folded.has(n)) return undefined;
+      const inline = inlinePieces(n);
+      if (inline) return { entry: e, pieces: inline, inline: true, link: isLink(n) ? n : undefined };
+      const bare = barePiece(n);
+      return bare?.box ? { entry: e, pieces: [bare], inline: false } : undefined;
+    };
+    const flows = insideEmsn ? [] : entries.map(flowOf);
+    const textOnly = (f: Flow | undefined): f is Flow => !!f && !f.link && !usable(f.entry.node?.emsn);
+    // A link flows only beside text in its sentence; a run of links (a menu) keeps a line each.
+    for (const [i, f] of flows.entries()) {
+      if (!f?.link) continue;
+      const near = [flows[i - 1], flows[i + 1]].filter(textOnly).flatMap((g) => g.pieces);
+      if (!besideText(f.pieces, near)) flows[i] = undefined;
+    }
+    for (let i = 0; i < entries.length; ) {
+      const group: Flow[] = [];
+      for (let j = i; j < entries.length; j++) {
+        const f = flows[j];
         const prev = group.at(-1);
-        if (!piece?.box || (prev && !sameLine(prev.piece.box, piece.box))) break;
-        group.push({ node: children[j], piece: { ...piece, box: piece.box } });
+        if (!f || (prev && !continues(prev, f))) break;
+        group.push(f);
       }
-      if (group.length < 2) {
-        walk(children[i], depth, insideEmsn);
+      const single = group.length === 1 && !group[0].entry.pieces;
+      if (!group.length || single) {
+        if (entries[i].node) walk(entries[i].node!, depth, insideEmsn);
         i++;
         continue;
       }
-      const shown = group.map((g) => g.node.shown);
+      const shown = group.map((g) => g.entry.node?.shown ?? g.entry.shown);
       const mark = !numbers
         ? ""
         : shown.every((v) => v === "no")
@@ -939,12 +1121,40 @@ export function renderWithLinks(
           : shown.some((v) => v === "no" || v === "partial")
             ? " partly offscreen"
             : "";
-      const joined = joinPieces(group.map((g) => g.piece));
-      lines.push(`${"\t".repeat(Math.min(depth, MAX_INDENT))}${numbers ? "· " : ""}"${joined}"${mark}`);
+      const joined = joinPieces(group.flatMap((g) => g.pieces));
+      lines.push(`${indent(depth)}${numbers ? "· " : ""}"${joined}"${mark}`);
+      for (const g of group) if (g.entry.node) folded.add(g.entry.node);
       i += group.length;
     }
   }
 
+  /** Whether f carries on prev's line: on the same line, or, for inline text, on the next. */
+  function continues(prev: { pieces: Piece[]; inline: boolean }, f: { pieces: Piece[]; inline: boolean }): boolean {
+    const last = prev.pieces[prev.pieces.length - 1];
+    const a = prev.inline ? (last.end ?? last.box) : last.box;
+    const b = f.inline ? (f.pieces[0].start ?? f.pieces[0].box) : f.pieces[0].box;
+    if (!a || !b) return false;
+    if (sameLine(a, b)) return true;
+    return prev.inline && f.inline && b.y > a.y && b.y - (a.y + a.h) < a.h;
+  }
+
   walk(parsed, 0, false);
-  return { text: lines.join("\n"), links: addresses };
+  // Every number shown, with its line: one at a line's start, and each link in a sentence. Only
+  // when numbering: a line read without numbers may start with the page's own digits.
+  const shown = new Map<string, string>();
+  const done = lines.map((line) => {
+    const out = line
+      .replace(LINK, (_, e: string) => `](#${e})`)
+      .replace(NOTE, (_, h: string) => {
+        if (!footnote.has(h)) footnote.set(h, addresses.push(h));
+        return `[^${footnote.get(h)}]`;
+      });
+    const bare = out.replace(/^\t+/, "");
+    const lead = numbers ? /^(\d+) /.exec(bare)?.[1] : undefined;
+    for (const e of [...(lead ? [lead] : []), ...[...line.matchAll(LINK)].map((m) => m[1])]) {
+      if (!shown.has(e)) shown.set(e, bare);
+    }
+    return out;
+  });
+  return { text: done.join("\n"), links: addresses, numbers: shown };
 }

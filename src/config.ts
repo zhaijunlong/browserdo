@@ -8,13 +8,15 @@ import path from "node:path";
  * environment variable.
  */
 
+/** BrowserDo's own files on this computer: the debug log, the record of installed skills. */
+export const BROWSERDO_DATA_DIR = path.join(
+  process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"),
+  "Embiody", "BrowserDo",
+);
+
 /** Debug log file: URLs and steps, never page content or the task text. EMBIODY_DEBUG_LOG moves it for tests only. */
 export const DEBUG_LOG_PATH =
-  process.env.EMBIODY_DEBUG_LOG ??
-  path.join(
-    process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"),
-    "Embiody", "BrowserDo", "logs", "debug.log",
-  );
+  process.env.EMBIODY_DEBUG_LOG ?? path.join(BROWSERDO_DATA_DIR, "logs", "debug.log");
 
 /**
  * Save every snapshot (raw image, annotated image, annotatedContent) to SNAPSHOT_DIR. Off by

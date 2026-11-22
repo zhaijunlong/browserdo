@@ -11,6 +11,8 @@ export interface CdpCall {
    * written as undefined turns into an InvalidParams, so contract checks must read this one.
    */
   wireKeys: string[];
+  /** The time limit the caller asked for, if any. */
+  timeoutMs?: number;
 }
 
 /** A route: takes params, returns the reply; returning an Error instance means this call should throw. */
@@ -42,12 +44,13 @@ export class FakeCdp {
     return this;
   }
 
-  async sendCommand(method: string, params?: object): Promise<unknown> {
+  async sendCommand(method: string, params?: object, timeoutMs?: number): Promise<unknown> {
     const raw = { ...((params ?? {}) as Record<string, unknown>) };
     this.calls.push({
       method,
       params: raw,
       wireKeys: Object.keys(raw).filter((k) => raw[k] !== undefined),
+      timeoutMs,
     });
 
     const route = this.routes.get(method);

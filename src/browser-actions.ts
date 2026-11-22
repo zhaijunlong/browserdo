@@ -102,10 +102,16 @@ function promptNote(result: any): string {
   const busy = p.joined || (p.queuedMs ?? 0) > 0;
   return (
     `. The person was asked first${p.joined ? " (the same question was already up)" : ""}` +
-    `${(p.queuedMs ?? 0) > 0 ? ` after waiting ${Math.round(p.queuedMs! / 1000)} s behind another question` : ""}: ` +
+    `${(p.queuedMs ?? 0) > 0 ? ` after waiting ${Math.max(1, Math.round(p.queuedMs! / 1000))} s behind another question` : ""}: ` +
     `${OUTCOMES[p.outcome] ?? `outcome ${p.outcome}`}` +
     (busy ? ". They are busy at this window; leave their tabs in it alone for now" : "")
   );
+}
+
+/** The raw humanPrompt as data, when there is one. */
+function promptData(result: any): { data?: { humanPrompt: HumanPrompt } } {
+  const p = humanPrompt(result);
+  return p ? { data: { humanPrompt: p } } : {};
 }
 
 /** Append promptNote to a result and keep the raw field in data. */
@@ -129,10 +135,11 @@ async function sendRetryingFocus(
   cdp: CdpClient,
   method: string,
   payload: Record<string, unknown>,
+  timeoutMs?: number,
 ): Promise<{ result?: any; error?: string }> {
   const send = async (): Promise<{ result?: any; error?: string }> => {
     try {
-      return { result: await cdp.sendCommand(method, payload) };
+      return { result: await cdp.sendCommand(method, payload, timeoutMs) };
     } catch (error) {
       return { error: errorMessage(error) };
     }
@@ -789,7 +796,7 @@ export async function browserCloseTab(
       const w = layout.find((x) => x.windowId === target.windowId);
       return withPrompt({ ok: true, text: `Tab closed (${w ? w.tabs.length : 0} remaining)` }, result);
     }
-    return { ok: false, text: `The tab is still open: ${stillOpen(result)}`, data: { humanPrompt: humanPrompt(result) } };
+    return { ok: false, text: `The tab is still open: ${stillOpen(result)}`, ...promptData(result) };
   }
   return withPrompt({
     ok: true,
@@ -819,7 +826,7 @@ export async function browserCloseWindow(
     if (layout && !layout.some((w) => w.windowId === win.windowId)) {
       return withPrompt({ ok: true, text: `Closed browser window windowId=${win.windowId}` }, result);
     }
-    return { ok: false, text: `The window is still open: ${stillOpen(result)}`, data: { humanPrompt: humanPrompt(result) } };
+    return { ok: false, text: `The window is still open: ${stillOpen(result)}`, ...promptData(result) };
   }
   return withPrompt({ ok: true, text: `Closed browser window windowId=${win.windowId}` }, result);
 }
@@ -1139,6 +1146,16 @@ export async function browserClick(
 }
 
 /**
+ * The kernel types one character at a time: measured 2026-11-19 at about 19 ms a character in a
+ * plain textarea (16 for Chinese), slower in rich editors. Half that pace, on top of the usual time.
+ */
+export const TYPING_MS_PER_CHAR = 40;
+
+export function inputTextTimeoutMs(text: string): number {
+  return CDP_COMMAND_TIMEOUT_MS + text.length * TYPING_MS_PER_CHAR;
+}
+
+/**
  * Type text (wrapping Embiody.browserInputText).
  * The same validation as browserClick, plus one retryable failure: the kernel hit the input
  * but could not confirm within ten seconds that the target frame took input focus (a busy
@@ -1188,7 +1205,16 @@ export async function browserInputText(
     replace: params.replace,
     at: params.at,
     occurrence: params.occurrence,
-  });
+  }, inputTextTimeoutMs(params.text ?? ""));
+  if (attempt.error && /CDP command timeout/.test(attempt.error)) {
+    // The browser goes on typing after we stop waiting: typing it again would enter it twice.
+    return {
+      ok: false,
+      text:
+        `No reply in time (${attempt.error}); the browser may still be typing. Do not type it again: ` +
+        "take a snapshot and read the field's value, wait with browser_wait while it keeps growing, then go on.",
+    };
+  }
   if (attempt.error) {
     return { ok: false, text: `Typing failed: ${attempt.error}` };
   }
@@ -1818,7 +1844,7 @@ export async function takeSnapshots(
 
       // No picture is not a failure: the browser says so when a window is off the screen, and
       // the numbers were read from the page just now. Its message then explains the missing
-      // picture, and is not the "captured while still loading" note it is otherwise.
+      // picture; otherwise, picture or not, it is the note on the page (still loading, a PDF...).
       const annotatedImage = r.annotatedImage
         ? ensureBase64(r.annotatedImage, "annotatedImage")
         : undefined;
@@ -1850,7 +1876,7 @@ export async function takeSnapshots(
           typeof r.elapsedMs === "number" && Number.isFinite(r.elapsedMs)
             ? r.elapsedMs
             : undefined,
-        loadingMessage: annotatedImage ? message : undefined,
+        loadingMessage: noImageReason ? undefined : message,
       });
     }
   }

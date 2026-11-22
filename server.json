@@ -8,21 +8,21 @@
     "source": "github"
   },
   "websiteUrl": "https://embiody.com/browserdo/",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "browserdo-mcp",
-      "version": "0.9.6",
+      "version": "0.9.7",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/zhaijunlong/browserdo/releases/download/v0.9.6/browserdo-mcp-cldd-0.9.6.mcpb",
-      "version": "0.9.6",
-      "fileSha256": "3595ca6c07ef818200205f31dea8fa2deb5b1339da1cf4981a9e6d4811e7bdd1",
+      "identifier": "https://github.com/zhaijunlong/browserdo/releases/download/v0.9.7/browserdo-mcp-cldd-0.9.7.mcpb",
+      "version": "0.9.7",
+      "fileSha256": "59cf2685837a5a20f2c3829b14d6fd40ac17de8fa7b50ef7008b919d9043c319",
       "transport": {
         "type": "stdio"
       }

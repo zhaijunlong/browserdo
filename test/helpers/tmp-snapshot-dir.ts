@@ -14,6 +14,7 @@ import path from "node:path";
 process.env.EMBIODY_SNAPSHOT_DIR = path.join(
   os.tmpdir(),
   "browserdo-test",
-  String(process.pid),
+  // Not the pid alone: Windows reuses it, and other test files leave a debug log under browserdo-test/<pid>.
+  `snapshots-${process.pid}-${Date.now()}`,
 );
 delete process.env.EMBIODY_SAVE_SNAPSHOTS;

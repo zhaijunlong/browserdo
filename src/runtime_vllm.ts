@@ -878,7 +878,7 @@ export class RuntimeVllmClient {
       "4. And the reverse: **copy numbers from annotatedContent, never read them off the image.** Where numbers are dense in the image they overlap; measured, the left navigation bar had 40/39 and 124/125 stacked on each other, so reading them visually gets them wrong. Use the image to tell **which one**, and the text to get **which number**.",
       "",
       "[HOW TO READ annotatedContent]",
-      "1. One element per line, shaped `<emsn> <tag> [title] text`. A line indented with a Tab sits **inside the element on the line above**.",
+      "1. One element per line, shaped `<emsn> <tag> [title] text`. A line indented with a Tab sits **inside the element on the line above**. A link inside a sentence stays in it as `[words](#12)`, emsn 12.",
       "2. A line starting with `-` is text that can only be **read, not operated on**, because it has no number. To act on it, find the numbered element that carries it.",
       "3. Inside `[]` is the accessible name or the placeholder, and what follows is the visible text. Either may be empty.",
       "4. Use emsn values from the **latest round** only. Old numbers appearing in the execution history are void and must never be copied, because in the new batch the same number points at a **different** element.",

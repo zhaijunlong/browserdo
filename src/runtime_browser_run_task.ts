@@ -52,6 +52,7 @@ import {
   SNAPSHOT_RETRY_DELAY_MS,
 } from "./config.js";
 import { withInstallNotice } from "./install_notice.js";
+import { refuseUnknownArgs } from "./strict_args.js";
 import { appendDebugLog } from "./logger.js";
 import {
   registerTask,
@@ -1679,7 +1680,7 @@ export function registerRuntimeBrowserRunTaskTool(
     toolName: "browser_run_task",
   });
 
-  server.experimental.tasks.registerToolTask(
+  const tool = server.experimental.tasks.registerToolTask(
     "browser_run_task",
     {
       // Describe behaviour, not protocol or internals. The host's model and the user read
@@ -1820,6 +1821,7 @@ export function registerRuntimeBrowserRunTaskTool(
       },
     },
   );
+  refuseUnknownArgs("browser_run_task", tool);
 }
 
 export function registerBrowserStopTaskTool(server: McpServer): void {

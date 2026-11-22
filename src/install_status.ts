@@ -1,8 +1,12 @@
 import { EMBIODY_GITHUB_DOWNLOAD_BASE, EMBIODY_INSTALLER_NAME } from "./config.js";
 
-/** How far an install BrowserDo started has got; idle when nothing is being installed. */
+/**
+ * How far an install BrowserDo started has got; idle when nothing is being installed. checking: at
+ * startup, before it is known whether the browser is installed.
+ */
 export type InstallStatus =
   | { phase: "idle" }
+  | { phase: "checking" }
   | { phase: "downloading"; source: "GitHub" | "cnb"; received: number; total: number | null; startedAt: number }
   | { phase: "installing" }
   | { phase: "elsewhere" }
@@ -12,8 +16,19 @@ export type InstallStatus =
 let status: InstallStatus = { phase: "idle" };
 let recheck: () => Promise<void> = async () => {};
 
+let checked: Array<() => void> = [];
+
 export function setInstallStatus(next: InstallStatus): void {
   status = next;
+  if (next.phase !== "checking") {
+    for (const resolve of checked) resolve();
+    checked = [];
+  }
+}
+
+/** Resolves once the startup check has found out whether the browser is installed (a few tens of ms). */
+export function installChecked(): Promise<void> {
+  return status.phase === "checking" ? new Promise((resolve) => checked.push(resolve)) : Promise.resolve();
 }
 
 export function getInstallStatus(): InstallStatus {
@@ -49,6 +64,8 @@ export function installProgress(now = Date.now()): string | null {
   switch (status.phase) {
     case "idle":
       return null;
+    case "checking":
+      return "BrowserDo has just started and is checking whether the Embiody browser is installed; this takes a moment.";
     case "downloading": {
       const { source, received, total, startedAt } = status;
       const got = Math.round(received / MB);

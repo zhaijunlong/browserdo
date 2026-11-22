@@ -97,7 +97,9 @@ and the agent can read just the screen it is working on.
 *Real speed: the agent fills 4 form fields in 2.5 seconds with one call. Click for the 3-second clip.*
 
 `browser_batch` runs several actions (clicks, typing, key presses) in a row and returns a fresh
-snapshot of the page, so the agent needs fewer round trips and fewer tokens.
+snapshot of the page, so the agent needs fewer round trips and fewer tokens. A step can wait for
+a text to appear and aim at the element showing it ("type, wait for the suggestions, click the
+second one" in one call), and the snapshot can be cut to the lines that changed.
 
 ### 8. Reads the page itself, not a summary
 
@@ -241,6 +243,14 @@ Add a local (stdio) MCP server in your client's settings, with command `npx` and
 }
 ```
 
+### The skill
+
+The `browserdo` skill tells your agent when and how to use these tools, for example to search
+with BrowserDo instead of a built-in search tool. BrowserDo installs it the first time it starts
+(see Privacy). To install it on its own, for example before adding BrowserDo, run
+`npx skills add zhaijunlong/browserdo -g` (the `skills` command needs Node.js 22.20 or newer). An
+agent that has the skill but not the tools offers to add BrowserDo for you.
+
 Then ask your agent to do something on the web:
 
 > Find me a direct flight from Sydney to Melbourne next Wednesday morning and show me the
@@ -253,9 +263,9 @@ and the frontmost window and tab are used.
 
 | Tool | What it does |
 | --- | --- |
-| `browser_take_snapshot` | The page as one line per element, each actionable element with a number, plus the page position, URL, title, any popups in the way and a `snapshotId`. Says when the page is a PDF, an error page or a crashed tab. `includeImage` adds the annotated screenshot; `readWholePage` reads beyond the screen. |
+| `browser_take_snapshot` | The page as one line per element, each actionable element with a number, plus the page position, URL, title, any popups in the way and a `snapshotId`. Says when the page is a PDF, an error page or a crashed tab. `includeImage` adds the annotated screenshot; `readWholePage` reads beyond the screen; `changesSince` gives only the lines changed since an earlier snapshot. |
 | `browser_read_pages` | Read up to 10 pages at once in background tabs and get their text, with links as footnotes. |
-| `browser_batch` | Several actions on one tab in a row, then a fresh snapshot. Stops at the first failure, and after a step that changed the page. |
+| `browser_batch` | Several actions on one tab in a row, then a fresh snapshot (whole, only the changes, or none). A step can aim by text at what an earlier one made appear, and may be skipped when it fails. Stops at the first failure otherwise. |
 | `browser_click`, `browser_input_text`, `browser_press_key`, `browser_select_editable_text`, `browser_scroll` | Act on an element by its number and the `snapshotId` it came from. `browser_input_text` can also edit at a place named by the surrounding words. |
 | `browser_move`, `browser_drag` | Hover; press, carry and release. Drag works sliders, canvases and reorderable lists. |
 | `browser_navigate`, `browser_go_back`, `browser_go_forward`, `browser_reload`, `browser_stop_loading`, `browser_wait` | Getting around. |
@@ -298,6 +308,13 @@ BrowserDo has no telemetry, usage statistics or error reporting.
 - **On your computer**: a debug log at `%LOCALAPPDATA%\Embiody\BrowserDo\logs` records the URLs
   visited and the steps taken, never page content or your task. It keeps at most three 5 MB files.
   Snapshots are not saved unless you set `EMBIODY_SAVE_SNAPSHOTS=1`.
+- **Skill files**: when it starts, BrowserDo puts its skill in `~/.claude/skills/browserdo` (read
+  by Claude Code), `~/.agents/skills/browserdo` (Codex, Cursor, Gemini CLI) and
+  `~/.copilot/skills/browserdo` (GitHub Copilot in VS Code), each only when such an agent is
+  installed. It never replaces a skill of the same
+  name that it did not put there, keeps its own up to date, and does not put one back once you
+  delete it. The Claude plugin carries the skill itself, so with the plugin it leaves
+  `~/.claude/skills` alone.
 - **Your profile**: the agent works in your own Embiody, in its Default profile, so it can use
   the sites you are signed in to there. Other Embiody profiles are not used, and neither are other
   browsers on your computer, such as Chrome or Edge. To keep the agent

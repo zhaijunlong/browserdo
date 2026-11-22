@@ -1,6 +1,6 @@
 {
   "name": "browserdo-mcp",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Built for AI agents. Shared with people. The MCP server for Embiody, the Windows browser your AI agent works in while you keep using your PC.",
   "mcpName": "io.github.zhaijunlong/browserdo",
   "type": "module",
@@ -22,6 +22,7 @@
   },
   "files": [
     "dist",
+    "claude/plugin/skills",
     "browserdo.config.example.yaml",
     "browserdo.config.example.json"
   ],

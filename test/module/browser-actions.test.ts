@@ -453,6 +453,21 @@ describe("browser-actions: the popups a snapshot brings back (scoped in three la
     assert.ok(shot.emsnLines?.size, "the numbers are kept");
   });
 
+  it("with no picture asked for, the browser's message is kept as the page's note", async () => {
+    const note = "The page itself had loaded, but frames in it were still loading.";
+    const cdp = cdpWith({
+      "Embiody.browserTakeSnapshot": (p: Record<string, unknown>) => {
+        const r = snapshotReply(p) as any;
+        delete r.windows[0].tabs[0].annotatedImage;
+        r.windows[0].tabs[0].message = note;
+        return r;
+      },
+    });
+    const shot = await A.takeSnapshot(cdp.asCdp(), { windowId: "900", tabId: "1001", image: false });
+    assert.equal(shot.loadingMessage, note);
+    assert.equal(shot.noImageReason, undefined);
+  });
+
   it("image: false asks the browser for no picture at all", async () => {
     const cdp = cdpWith();
     await A.takeSnapshot(cdp.asCdp(), { windowId: "900", tabId: "1001", image: false });
@@ -663,6 +678,16 @@ describe("browser-actions: clicking and typing", () => {
     const r = await A.browserInputText(cdp.asCdp(), { text: "hi", ...TARGET, ...SNAP });
     assert.equal(r.ok, false);
     assert.equal(n, 1, "a non-retryable error must not be retried");
+  });
+
+  it("long text gets time to be typed, and running out of it does not say the typing failed", async () => {
+    const text = "x".repeat(5000);
+    const cdp = cdpWith({ "Embiody.browserInputText": new Error("CDP command timeout: Embiody.browserInputText") });
+    const r = await A.browserInputText(cdp.asCdp(), { text, ...TARGET, ...SNAP });
+    assert.equal(cdp.lastCall("Embiody.browserInputText").timeoutMs, A.inputTextTimeoutMs(text));
+    assert.equal(r.ok, false);
+    assert.match(r.text, /may still be typing. Do not type it again/);
+    assert.equal(cdp.callsTo("Embiody.browserInputText").length, 1);
   });
 });
 
@@ -1709,5 +1734,95 @@ describe("browser-actions: other replies", () => {
     const cdp = cdpWith({ "Embiody.browserNewTab": () => ({ windowId: "900", loadStatus: "committed" }) });
     const r = await A.browserAddNewTab(cdp.asCdp(), { windowId: "900" });
     assert.equal(r.ok, false, r.text);
+  });
+});
+
+describe("browser-actions: the person was asked first (extraInfo.humanPrompt)", () => {
+  const asked = (outcome: string, over: Record<string, unknown> = {}) =>
+    ({ extraInfo: { humanPrompt: { outcome, joined: false, queuedMs: 0, ...over } } });
+  const stillThere = () => ({ windows: [{ windowId: TARGET.windowId, tabs: [{ tabId: TARGET.tabId }] }] });
+
+  it("no humanPrompt adds no note and no data", async () => {
+    const r = await A.browserCloseTab(cdpWith().asCdp(), { ...TARGET });
+    assert.doesNotMatch(r.text, /asked/);
+    assert.equal(r.data?.humanPrompt, undefined);
+    assert.equal(await A.browserSelectTab(cdpWith().asCdp(), { ...TARGET }), "");
+  });
+
+  it("waiting behind another question: says how long, at least 1 s, and that they are busy", async () => {
+    for (const [queuedMs, secs] of [[300, 1], [9085, 9]] as const) {
+      const cdp = cdpWith({ "Embiody.browserClick": { success: true, ...asked("answered", { queuedMs }) } });
+      const r = await A.browserClick(cdp.asCdp(), { emsn: 1, ...TARGET, ...SNAP });
+      assert.match(r.text, new RegExp(`after waiting ${secs} s behind another question: they answered\. They are busy`));
+    }
+  });
+
+  it("answered at once: no busy hint", async () => {
+    const cdp = cdpWith({ "Embiody.browserClick": { success: true, ...asked("answered") } });
+    const r = await A.browserClick(cdp.asCdp(), { emsn: 1, ...TARGET, ...SNAP });
+    assert.match(r.text, /asked first: they answered$/);
+  });
+
+  it("the kernel's own message and the asked note both reach the model", async () => {
+    const cdp = cdpWith({ "Embiody.browserClick": { success: true, message: "element moved", ...asked("timedOut") } });
+    const r = await A.browserClick(cdp.asCdp(), { emsn: 1, ...TARGET, ...SNAP });
+    assert.match(r.text, /kernel note: element moved\. The person was asked first: nobody answered/);
+  });
+
+  it("an outcome this version does not know is passed on by name", async () => {
+    const cdp = cdpWith({ "Embiody.browserSelectTab": { success: true, ...asked("snoozed") } });
+    assert.match(await A.browserSelectTab(cdp.asCdp(), { ...TARGET }), /outcome snoozed/);
+  });
+
+  it("navigation keeps the raw humanPrompt in data", async () => {
+    const cdp = cdpWith({
+      "Embiody.browserNavigate": () => ({ ...navReply(), ...asked("answered", { joined: true }) }),
+    });
+    const r = await A.browserNavigate(cdp.asCdp(), { url: "https://example.com", ...TARGET });
+    assert.match(r.text, /same question was already up/);
+    assert.equal((r.data?.humanPrompt as any)?.joined, true);
+  });
+
+  it("a tab left open: kept by the person, withdrawn, or the page's own Leave site?", async () => {
+    const run = async (reply: Record<string, unknown>) =>
+      A.browserCloseTab(cdpWith({
+        "Embiody.browserCloseTab": { success: false, ...reply },
+        "Embiody.browserGetWindowInfo": stillThere,
+      }).asCdp(), { ...TARGET });
+
+    const kept = await run(asked("answered"));
+    assert.equal(kept.ok, false);
+    assert.match(kept.text, /it is the person's, they were asked and kept it\. Leave it open/);
+
+    const dismissed = await run(asked("dismissed"));
+    assert.match(dismissed.text, /they were asked and they closed the question without answering/);
+
+    const withdrawn = await run(asked("withdrawn"));
+    assert.match(withdrawn.text, /still open: the question was withdrawn/);
+
+    const page = await run({});
+    assert.match(page.text, /Leave site\?/);
+    assert.equal(page.data, undefined);
+  });
+
+  it("a window left open after gaveUp says to try again, with the raw field", async () => {
+    const cdp = cdpWith({ "Embiody.browserCloseWindow": { success: false, ...asked("gaveUp", { queuedMs: 15000 }) } });
+    const r = await A.browserCloseWindow(cdp.asCdp(), { windowId: TARGET.windowId });
+    assert.equal(r.ok, false);
+    assert.match(r.text, /window is still open: .*not a refusal; try again later/);
+    assert.equal((r.data?.humanPrompt as any)?.outcome, "gaveUp");
+  });
+
+  it("taking control back: gaveUp and withdrawn are not the person refusing", async () => {
+    for (const outcome of ["gaveUp", "withdrawn"]) {
+      const cdp = cdpWith({ "Embiody.browserStopHumanControl": { success: false, reason: "userTookOver", ...asked(outcome) } });
+      const r = await A.browserStopHumanControl(cdp.asCdp(), { ...TARGET });
+      assert.equal(r.ok, false);
+      assert.match(r.text, /^Control was not taken back: /);
+      assert.doesNotMatch(r.text, /deliberately/);
+    }
+    const refused = cdpWith({ "Embiody.browserStopHumanControl": { success: false, reason: "userTookOver", ...asked("answered") } });
+    const r = await A.browserStopHumanControl(refused.asCdp(), { ...TARGET });
+    assert.match(r.text, /deliberately.*asked first: they answered/);
   });
 });

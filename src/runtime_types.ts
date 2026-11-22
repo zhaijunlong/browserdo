@@ -405,8 +405,8 @@ export interface TabSnapshot {
    */
   emsnLines?: ReadonlyMap<string, string>;
   /**
-   * The kernel's note for "the deadline passed while the page was still loading, so I captured
-   * anyway". When present it must reach the model: the image it is looking at may be half-built.
+   * The kernel's note on what this capture lacks: the page or frames in it still loading, a PDF
+   * whose text is not in it, a crashed or error page. When present it must reach the model.
    */
   loadingMessage?: string;
 }

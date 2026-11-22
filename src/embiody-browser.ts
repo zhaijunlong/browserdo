@@ -252,18 +252,24 @@ export const EMBIODY_SIGNER = "SELECTIOUS PTY LTD";
  * not that we published it. The Authenticode signature does: it must be valid and its signer
  * must be EMBIODY_SIGNER.
  */
-async function verifyInstallerSignature(file: string): Promise<void> {
+export async function verifyInstallerSignature(file: string): Promise<void> {
   const windows = process.env.SystemRoot;
   if (!windows) throw new Error("The installer was not run: SystemRoot is not set, so its signature could not be checked");
   const powershell = path.join(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const { stdout } = await execFileAsync(
-    powershell,
-    [
-      "-NoProfile", "-NonInteractive", "-Command",
-      "$s = Get-AuthenticodeSignature -LiteralPath $env:BROWSERDO_INSTALLER; $s.Status; $s.SignerCertificate.Subject",
-    ],
-    { windowsHide: true, timeout: 60_000, env: { ...process.env, BROWSERDO_INSTALLER: file } },
-  );
+  let stdout: string;
+  try {
+    // The path goes in through the environment, so no quoting of it reaches PowerShell.
+    ({ stdout } = await execFileAsync(
+      powershell,
+      [
+        "-NoProfile", "-NonInteractive", "-Command",
+        "$s = Get-AuthenticodeSignature -LiteralPath $env:BROWSERDO_INSTALLER; $s.Status; $s.SignerCertificate.Subject",
+      ],
+      { windowsHide: true, timeout: 60_000, env: { ...process.env, BROWSERDO_INSTALLER: file } },
+    ));
+  } catch (error) {
+    throw new Error(`The installer was not run: its signature could not be checked (${error instanceof Error ? error.message : String(error)})`);
+  }
   const problem = signatureProblem(stdout);
   if (problem) throw new Error(`The installer was not run: ${problem}`);
   await appendDebugLog("embiody_browser", "installer signature verified", { signer: EMBIODY_SIGNER });
@@ -402,11 +408,87 @@ function processExists(pid: number): boolean {
   }
 }
 
+/**
+ * The updater's record of the last install; per user, as BrowserDo installs per user. Cleared
+ * before installing so that what is read after is this install's: an earlier attempt's record
+ * would pass for it, with the very same values when the person retries without closing the program.
+ */
+const INSTALL_RESULT_KEY = "HKCU:\\Software\\Embiody\\Update";
+const INSTALL_RESULT_VALUES = ["LastInstallerResult", "LastInstallerError", "LastInstallerExtraCode1", "LastInstallerResultUIString"];
+/** The installer's error when another program holds a file it has to replace. */
+export const FILE_IN_USE = 75900;
+
+/** Run a PowerShell script and return what it prints, as UTF-8 so that any language comes through. */
+async function powershell(script: string): Promise<string> {
+  const root = process.env.SystemRoot;
+  const exe = root ? path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+  const full = `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${script}`;
+  const { stdout } = await execFileAsync(
+    exe,
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(full, "utf16le").toString("base64")],
+    { windowsHide: true, timeout: 60_000 },
+  );
+  return stdout;
+}
+
+/** Remove those four values only, keeping the key and its other values; false when that failed. */
+async function clearInstallResult(): Promise<boolean> {
+  try {
+    await powershell(
+      `Remove-ItemProperty -LiteralPath '${INSTALL_RESULT_KEY}' -Name ${INSTALL_RESULT_VALUES.join(",")} -ErrorAction SilentlyContinue; ` +
+        `if (Get-ItemProperty -LiteralPath '${INSTALL_RESULT_KEY}' -Name ${INSTALL_RESULT_VALUES.join(",")} -ErrorAction SilentlyContinue) { exit 1 }`,
+    );
+    return true;
+  } catch (error) {
+    await appendDebugLog("embiody_browser", "could not clear the last install result", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/** The installer's own words on a file in use, read from its record; null for any other outcome. */
+async function readFileInUse(): Promise<string | null> {
+  try {
+    return fileInUse(
+      await powershell(
+        `Get-ItemProperty -LiteralPath '${INSTALL_RESULT_KEY}' -ErrorAction SilentlyContinue | ` +
+          `Select-Object ${INSTALL_RESULT_VALUES.join(",")} | ConvertTo-Json -Compress`,
+      ),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * From the record as JSON: when LastInstallerError is FILE_IN_USE, the explanation the installer
+ * wrote for the person (in the install's language), or one of our own when it wrote none; else null.
+ */
+export function fileInUse(json: string): string | null {
+  let record: Record<string, unknown>;
+  try {
+    record = JSON.parse(json) ?? {};
+  } catch {
+    return null;
+  }
+  if (record.LastInstallerError !== FILE_IN_USE) return null;
+  const said = typeof record.LastInstallerResultUIString === "string" ? record.LastInstallerResultUIString.trim() : "";
+  if (said) return said;
+  const pid = Number(record.LastInstallerExtraCode1);
+  return `Another program${pid > 0 ? ` (process ${pid})` : ""} has a file open that the installer has to replace. Close it and try again.`;
+}
+
+/** Worded to sit in installProgress's "Installing the Embiody browser failed: <this>. It is tried again ...". */
+function fileInUseError(said: string): Error {
+  return new Error(`${said} Pass this on to the person: installing works once that program is closed`);
+}
+
 /** Poll the registry until the install is detected or we time out; returns the exe path or null. */
-async function waitForInstall(timeoutMs: number): Promise<string | null> {
+async function waitForInstall(timeoutMs: number, installedExe: () => Promise<string | null>): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const exePath = await getInstalledExePath();
+    const exePath = await installedExe();
     if (exePath) {
       return exePath;
     }
@@ -456,29 +538,55 @@ function holderProgress(sent: string | null): InstallStatus {
   return { phase: "elsewhere" };
 }
 
+/** What an install does that touches the network, the installer or the registry; tests swap them. */
+export interface InstallSteps {
+  download: (dest: string) => Promise<string>;
+  run: (installerPath: string) => Promise<void>;
+  clearResult: () => Promise<boolean>;
+  readFileInUse: () => Promise<string | null>;
+  installedExe: () => Promise<string | null>;
+  /** How long the browser may take to be registered once the installer has exited. */
+  registerMs: number;
+}
+
+const INSTALL_STEPS: InstallSteps = {
+  download: (dest) => downloadInstaller(dest),
+  run: runInstaller,
+  clearResult: clearInstallResult,
+  readFileInUse,
+  installedExe: getInstalledExePath,
+  registerMs: 120_000,
+};
+
 /** Download and silently install Embiody, returning the exe path; the install status follows each step. */
-async function downloadAndInstall(): Promise<string> {
+export async function downloadAndInstall(steps: InstallSteps = INSTALL_STEPS): Promise<string> {
   const installerPath = path.join(
     os.tmpdir(),
     `embiody_installer_${Date.now()}.exe`,
   );
   let exePath: string | null;
   try {
-    const source = await downloadInstaller(installerPath);
+    const source = await steps.download(installerPath);
     await appendDebugLog("embiody_browser", "installer downloaded", { source });
 
     setInstallStatus({ phase: "installing" });
     await appendDebugLog("embiody_browser", "running silent install", { installerPath });
+    const cleared = await steps.clearResult();
     try {
-      await runInstaller(installerPath);
+      await steps.run(installerPath);
     } finally {
       // The temp file can go once the installer has run.
       void safeUnlink(installerPath);
     }
 
-    exePath = await waitForInstall(120_000);
+    // A file in use stops the installer at once, its record written as it exits: no waiting for
+    // a browser that will not come. A record not cleared may be an earlier one, so it is not read.
+    const inUse = cleared ? await steps.readFileInUse() : null;
+    if (inUse) throw fileInUseError(inUse);
+    exePath = await waitForInstall(steps.registerMs, steps.installedExe);
     if (!exePath) {
-      throw new Error("Embiody is still not in the registry after installing");
+      const late = cleared ? await steps.readFileInUse() : null;
+      throw late ? fileInUseError(late) : new Error("Embiody is still not in the registry after installing");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -648,7 +756,23 @@ export function ensureEmbiodyInstalled(): Promise<string> {
   return installing;
 }
 
+let checkedOnce = false;
+
 async function findOrInstallExe(): Promise<string> {
+  // Only the startup check: a later one (each launch) must not hold tools back or change browser_status.
+  if (!checkedOnce) {
+    checkedOnce = true;
+    setInstallStatus({ phase: "checking" });
+  }
+  try {
+    return await findOrInstall();
+  } finally {
+    // A check that threw (a bad exePath, the registry unreadable) lets tools through to report it.
+    if (getInstallStatus().phase === "checking") setInstallStatus({ phase: "idle" });
+  }
+}
+
+async function findOrInstall(): Promise<string> {
   let exePath: string;
   const customExePath = process.env.EMBIODY_EXE_PATH?.trim();
   if (customExePath) {
