@@ -139,7 +139,8 @@ No API key is needed. Your agent drives the browser with its own model.
 ## Install
 
 BrowserDo runs as `npx -y browserdo-mcp`. Pick your client and follow only that section; the others
-are for other clients.
+are for other clients. Or [start from the skill](#start-from-the-skill) and let your agent add
+BrowserDo.
 
 ### Claude Code
 
@@ -243,13 +244,24 @@ Add a local (stdio) MCP server in your client's settings, with command `npx` and
 }
 ```
 
+### Start from the skill
+
+Install the `browserdo` skill for the agents on your computer (Claude Code, Codex, Cursor, Gemini
+CLI, GitHub Copilot and others):
+
+```bash
+npx skills add zhaijunlong/browserdo -g
+```
+
+This needs Node.js 22.20 or newer and Git. Then ask your agent to do something on the web: an agent
+that has the skill but not BrowserDo's tools offers to add BrowserDo, and once you agree runs the
+command for its client. Start a new session afterwards to use the tools.
+
 ### The skill
 
 The `browserdo` skill tells your agent when and how to use these tools, for example to search
 with BrowserDo instead of a built-in search tool. BrowserDo installs it the first time it starts
-(see Privacy). To install it on its own, for example before adding BrowserDo, run
-`npx skills add zhaijunlong/browserdo -g` (the `skills` command needs Node.js 22.20 or newer and Git). An
-agent that has the skill but not the tools offers to add BrowserDo for you.
+(see Privacy), so you need not install it yourself.
 
 Then ask your agent to do something on the web:
 
