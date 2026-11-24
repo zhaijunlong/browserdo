@@ -1257,7 +1257,11 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_select_tab",
-    "Bring a tab to the front of its window.",
+    "Bring a tab to the front of its window, so a person looking at that window sees it. Not " +
+      "needed before a snapshot or an action: every tool works on background tabs and hidden " +
+      "windows as they are, given the tabId. It does not bring the window itself on screen; " +
+      "browser_show does that. browser_get_window_info lists the ids. If the window is the " +
+      "person's, they may be asked first; the reply says so.",
     {
       windowId: z.string().describe("The tab's window."),
       tabId: z.string().describe("The tab to bring forward."),
@@ -1282,7 +1286,12 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_close_tab",
-    "Close a tab.",
+    "Close a tab, to clean up the tabs you opened once you are done with them. Returns how many " +
+      "tabs its window has left. A tab no agent is working in is brought to the front and the " +
+      "person is asked first: they may keep it, and it closes if nobody answers within 10 s. If " +
+      "the page asks \"Leave site?\" to keep unsaved input, the tab stays open and the reply says " +
+      "so: do not close it again, hand it to the person or leave it. To close a whole window use " +
+      "browser_close_window.",
     { ...TARGET },
     async ({ windowId, tabId }) => {
       const target = await resolveTarget(cdp, windowId, tabId);
@@ -1348,8 +1357,11 @@ export function registerThinBrowserTools(
 
   server.tool(
     "browser_set_audio_muted",
-    "Mute or unmute a tab.",
-    { ...TARGET, muted: z.boolean().describe("true to mute.") },
+    "Mute or unmute one tab, as the speaker icon on the tab does, for example a video page playing " +
+      "sound while you work. The page keeps playing, only silent. It belongs to the tab, not the " +
+      "site: it lasts through navigation in that tab and leaves other tabs on the same site alone. " +
+      "The reply gives the mute state read back from the tab.",
+    { ...TARGET, muted: z.boolean().describe("true mutes, false unmutes.") },
     async ({ windowId, tabId, muted }) => {
       const target = await resolveTarget(cdp, windowId, tabId);
       if (isTargetError(target)) return errorReply(target.error);
